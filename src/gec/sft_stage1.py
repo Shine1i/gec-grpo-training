@@ -120,7 +120,6 @@ def train_stage1():
         warmup_ratio=WARMUP_RATIO,
         optim="paged_adamw_8bit",
         weight_decay=0.01,
-        max_seq_length=MAX_SEQ_LENGTH,
         # Evaluation
         eval_strategy="steps",
         eval_steps=EVAL_STEPS,
