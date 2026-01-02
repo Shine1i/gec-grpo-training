@@ -116,7 +116,8 @@ class GECRewardModel:
         )
 
         # Log first 3 samples every call for debugging
-        print(f"[Reward] GRECO: {greco_scores[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, Laziness: {laziness_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
+        is_clean_str = str(is_clean[:3]) if is_clean else "None"
+        print(f"[Reward] GRECO: {greco_scores[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, Laziness: {laziness_penalties[:3].tolist()}, is_clean: {is_clean_str}, Final: {rewards[:3].tolist()}")
 
         return rewards.tolist()
 
