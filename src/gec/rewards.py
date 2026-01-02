@@ -27,7 +27,7 @@ class GECRewardModel:
 
         # Load GRECO from HuggingFace
         print(f"Loading GRECO from {greco_model_name}...")
-        self.greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=False).to(
+        self.greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=True).to(
             self.device
         )
         checkpoint_path = hf_hub_download(greco_model_name, "pytorch_model.bin")

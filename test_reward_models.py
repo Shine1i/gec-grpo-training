@@ -57,7 +57,7 @@ try:
     from models import GRECO
 
     print("\nLoading GRECO from mrqorib/grammaticality...")
-    greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=False).to(device)
+    greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=True).to(device)
 
     print("Downloading checkpoint from HuggingFace...")
     checkpoint_path = hf_hub_download("mrqorib/grammaticality", "pytorch_model.bin")
