@@ -108,6 +108,9 @@ class GECRewardModel:
             - self.laziness_weight * laziness_penalties
         )
 
+        # Log first 3 samples every call for debugging
+        print(f"[Reward] GRECO: {greco_scores[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, Laziness: {laziness_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
+
         return rewards.tolist()
 
 
