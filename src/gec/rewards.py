@@ -7,7 +7,16 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "greco"))
+# Handle both local and Modal paths for GRECO
+greco_paths = [
+    Path(__file__).parent.parent.parent / "greco",  # Local
+    Path("/root/greco"),  # Modal
+]
+for greco_path in greco_paths:
+    if greco_path.exists():
+        sys.path.insert(0, str(greco_path))
+        break
+
 from models import GRECO
 
 
