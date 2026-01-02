@@ -34,6 +34,7 @@ vllm_gpu_memory_utilization: 0.3
 
 # GRPO specific
 beta: 0.04  # KL penalty
+temperature: 1.0  # Sampling temperature for diverse generations
 
 # Reward weights
 greco_weight: 0.6

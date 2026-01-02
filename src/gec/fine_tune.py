@@ -119,6 +119,7 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
         generation_batch_size=config.generation_batch_size,
         max_completion_length=config.max_completion_length,
         beta=config.beta,
+        temperature=config.temperature,
         use_vllm=config.use_vllm,
         vllm_mode=config.vllm_mode,
         vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,

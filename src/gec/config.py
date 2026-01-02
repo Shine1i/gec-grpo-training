@@ -40,6 +40,7 @@ class GECConfig(BaseSettings):
 
     # GRPO specific
     beta: float = 0.04  # KL penalty
+    temperature: float = 1.0  # Sampling temperature for generations
 
     # Reward weights (should sum to 1.0)
     greco_weight: float = 0.6
