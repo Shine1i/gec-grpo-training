@@ -59,11 +59,14 @@ def _build_train_dataset(
     source_texts: list[str],
     system_prompt: str,
     references: list[str] | None = None,
+    is_clean_flags: list[bool] | None = None,
 ) -> Dataset:
     prompts = [make_gec_messages(src, system_prompt) for src in source_texts]
     data = {"prompt": prompts, "source": source_texts}
     if references is not None:
         data["reference"] = references
+    if is_clean_flags is not None:
+        data["is_clean"] = is_clean_flags
     return Dataset.from_dict(data)
 
 
@@ -95,12 +98,14 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
     dataset = load_gec_dataset(config.dataset_name, config.dataset_size)
     source_texts = dataset["prompt"]
     references = dataset["reference"] if "reference" in dataset.column_names else None
+    is_clean_flags = dataset["is_clean"] if "is_clean" in dataset.column_names else None
 
     # Prepare training dataset
     train_dataset = _build_train_dataset(
         source_texts=source_texts,
         system_prompt=config.system_prompt,
         references=references,
+        is_clean_flags=is_clean_flags,
     )
 
     output_dir = (

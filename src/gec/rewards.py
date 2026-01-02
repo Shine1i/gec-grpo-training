@@ -73,14 +73,20 @@ class GECRewardModel:
         return similarities.cpu()
 
     def compute_laziness_penalty(
-        self, sources: list[str], hypotheses: list[str]
+        self, sources: list[str], hypotheses: list[str], is_clean: list[bool] | None = None
     ) -> torch.Tensor:
         """
         Compute laziness penalty based on edit distance.
         Penalizes if correction is too similar to source (no real edits made).
+        Skips penalty for clean samples where copying is correct behavior.
         """
         penalties = []
-        for src, hyp in zip(sources, hypotheses):
+        for i, (src, hyp) in enumerate(zip(sources, hypotheses)):
+            # Skip laziness penalty for clean samples
+            if is_clean is not None and is_clean[i]:
+                penalties.append(0.0)
+                continue
+
             similarity = SequenceMatcher(None, src.lower(), hyp.lower()).ratio()
             # Penalize if model just copies input (similarity > 0.95)
             if similarity > 0.95:
@@ -91,16 +97,17 @@ class GECRewardModel:
         return torch.tensor(penalties)
 
     def compute_rewards(
-        self, sources: list[str], hypotheses: list[str]
+        self, sources: list[str], hypotheses: list[str], is_clean: list[bool] | None = None
     ) -> list[float]:
         """
         Compute composite reward.
 
         Reward = greco_weight * GRECO + semantic_weight * similarity - laziness_weight * penalty
+        Skips laziness penalty for clean samples.
         """
         greco_scores = self.compute_greco_scores(sources, hypotheses)
         semantic_scores = self.compute_semantic_similarity(sources, hypotheses)
-        laziness_penalties = self.compute_laziness_penalty(sources, hypotheses)
+        laziness_penalties = self.compute_laziness_penalty(sources, hypotheses, is_clean)
 
         rewards = (
             self.greco_weight * greco_scores
@@ -148,7 +155,7 @@ def _completion_to_text(completion) -> str:
 def build_gec_reward_func(reward_model: GECRewardModel):
     """Build a GRPO-compatible reward function using the composite GEC reward."""
 
-    def reward_func(prompts, completions, source, **kwargs) -> list[float]:
+    def reward_func(prompts, completions, source, is_clean=None, **kwargs) -> list[float]:
         completion_texts = [_completion_to_text(c) for c in completions]
         if isinstance(source, str):
             sources = [source] * len(completion_texts)
@@ -159,6 +166,15 @@ def build_gec_reward_func(reward_model: GECRewardModel):
                 "Mismatched sources and completions: "
                 f"{len(sources)} vs {len(completion_texts)}"
             )
-        return reward_model.compute_rewards(sources, completion_texts)
+
+        # Handle is_clean - expand to match completions if needed
+        is_clean_list = None
+        if is_clean is not None:
+            if isinstance(is_clean, bool):
+                is_clean_list = [is_clean] * len(completion_texts)
+            else:
+                is_clean_list = list(is_clean)
+
+        return reward_model.compute_rewards(sources, completion_texts, is_clean_list)
 
     return reward_func
