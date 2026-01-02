@@ -1,12 +1,12 @@
 #########################################################
-# GEC with moogin/typix-grammar-small (1.2B Gemma-based)
+# GEC with moogin/typix-grammar-large
 # Optimized for RTX 3090 24GB
 #########################################################
 
 seed: 42
 
 # Language Model
-model_name: moogin/typix-grammar-small
+model_name: moogin/typix-grammar-large
 max_seq_length: 512
 system_prompt: |
   You are a grammatical error correction assistant.
