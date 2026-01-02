@@ -57,9 +57,16 @@ class GECRewardModel:
     def compute_greco_scores(
         self, sources: list[str], hypotheses: list[str]
     ) -> torch.Tensor:
-        """Compute GRECO quality scores."""
+        """Compute GRECO quality scores for hypotheses."""
         with torch.no_grad():
             scores = self.greco.score(sources, hypotheses)
+        return scores.cpu()
+
+    def compute_source_greco_scores(self, sources: list[str]) -> torch.Tensor:
+        """Compute GRECO quality scores for source texts (used for gain calculation)."""
+        with torch.no_grad():
+            # GRECO expects (source, hypothesis) pairs - use source as both
+            scores = self.greco.score(sources, sources)
         return scores.cpu()
 
     def compute_semantic_similarity(
@@ -72,52 +79,46 @@ class GECRewardModel:
             similarities = F.cosine_similarity(source_embs, hyp_embs, dim=1)
         return similarities.cpu()
 
-    def compute_laziness_penalty(
-        self, sources: list[str], hypotheses: list[str], is_clean: list[bool] | None = None
+    def compute_edit_penalty(
+        self, sources: list[str], hypotheses: list[str]
     ) -> torch.Tensor:
         """
-        Compute laziness penalty based on edit distance.
-        Penalizes if correction is too similar to source (no real edits made).
-        Skips penalty for clean samples where copying is correct behavior.
+        Binary edit penalty: 1.0 if any edit was made, 0.0 if unchanged.
+        Discourages unnecessary edits - model must justify changes via GRECO gain.
         """
         penalties = []
-        for i, (src, hyp) in enumerate(zip(sources, hypotheses)):
-            # Skip laziness penalty for clean samples
-            if is_clean is not None and is_clean[i]:
-                penalties.append(0.0)
-                continue
-
-            similarity = SequenceMatcher(None, src.lower(), hyp.lower()).ratio()
-            # Penalize if model just copies input (similarity > 0.95)
-            if similarity > 0.95:
-                penalty = (similarity - 0.95) * 20  # Scale penalty
-            else:
-                penalty = 0.0
-            penalties.append(penalty)
+        for src, hyp in zip(sources, hypotheses):
+            has_edit = 1.0 if src.strip() != hyp.strip() else 0.0
+            penalties.append(has_edit)
         return torch.tensor(penalties)
 
     def compute_rewards(
         self, sources: list[str], hypotheses: list[str], is_clean: list[bool] | None = None
     ) -> list[float]:
         """
-        Compute composite reward.
+        Compute gain-based composite reward.
 
-        Reward = greco_weight * GRECO + semantic_weight * similarity - laziness_weight * penalty
-        Skips laziness penalty for clean samples.
+        Reward = greco_weight * GRECO_GAIN + semantic_weight * similarity - edit_weight * has_edit
+
+        Where GRECO_GAIN = GRECO(hypothesis) - GRECO(source)
+        This naturally handles clean samples (gain ≈ 0) and penalizes useless edits.
         """
-        greco_scores = self.compute_greco_scores(sources, hypotheses)
+        # Compute GRECO for both source and hypothesis
+        source_greco = self.compute_source_greco_scores(sources)
+        hyp_greco = self.compute_greco_scores(sources, hypotheses)
+        greco_gain = hyp_greco - source_greco
+
         semantic_scores = self.compute_semantic_similarity(sources, hypotheses)
-        laziness_penalties = self.compute_laziness_penalty(sources, hypotheses, is_clean)
+        edit_penalties = self.compute_edit_penalty(sources, hypotheses)
 
         rewards = (
-            self.greco_weight * greco_scores
+            self.greco_weight * greco_gain
             + self.semantic_weight * semantic_scores
-            - self.laziness_weight * laziness_penalties
+            - self.laziness_weight * edit_penalties
         )
 
-        # Log first 3 samples every call for debugging
-        is_clean_str = str(is_clean[:3]) if is_clean else "None"
-        print(f"[Reward] GRECO: {greco_scores[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, Laziness: {laziness_penalties[:3].tolist()}, is_clean: {is_clean_str}, Final: {rewards[:3].tolist()}")
+        # Log first 3 samples for debugging
+        print(f"[Reward] SrcGRECO: {source_greco[:3].tolist()}, HypGRECO: {hyp_greco[:3].tolist()}, Gain: {greco_gain[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, EditPen: {edit_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
 
         return rewards.tolist()
 
