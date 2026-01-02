@@ -8,34 +8,24 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "datasets>=4.4.1",
-    "numpy>=2.3.5",
-    "openenv-core>=0.1.1",
-    "requests>=2.32.5",
-    "torchvision>=0.24.1",
-    "gradio>=6.0.2",
-    "trackio>=0.10.0",
+    "torch>=2.0.0",
+    "datasets>=3.0.0",
     "transformers>=4.55.0",
     "trl>=0.25.1",
-    "pillow>=11.3.0",
-    "typer>=0.20.0",
-    "openenv",
-    "ruff>=0.1.0",
-    "modal>=1.2.5",
-    "pydantic-settings>=2.12.0",
-    "wandb>=0.23.1",
     "peft>=0.13.0",
     "sentence-transformers>=2.2.0",
     "huggingface_hub",
     "sentencepiece",
+    "pydantic-settings>=2.0.0",
+    "wandb",
+    "modal",
+    "typer",
+    "ruff>=0.1.0",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.8,<0.10.0"]
-build-backend = "uv_build"
-
-[tool.uv.sources]
-openenv = { git = "https://github.com/meta-pytorch/OpenEnv.git" }
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -114,6 +104,6 @@ force-single-line = false
 # Sort imports within their section
 force-sort-within-sections = true
 # Known first party modules
-known-first-party = ["browser_control", "gec", "envs"]
+known-first-party = ["gec"]
 # Section order
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]

@@ -4,65 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository fine-tunes LFM2-350M (Liquid AI's language model) for browser control using GRPO (Group Relative Policy Optimization) reinforcement learning. It uses BrowserGym environments via OpenEnv for training agents to navigate and interact with websites.
+GEC (Grammatical Error Correction) fine-tuning using GRPO (Group Relative Policy Optimization) with neural rewards. Trains LFM2-700M to correct grammar using a composite reward signal.
 
 ## Commands
 
-### Fine-tuning
 ```bash
-# Full fine-tune
-make fine-tune config=lfm2_350m.yaml
-
-# LoRA fine-tune (parameter efficient)
-make fine-tune config=lfm2_350m_lora.yaml
-```
-
-### Evaluation
-```bash
-make evaluation
-```
-
-### Development
-```bash
-# Install dependencies (uses uv)
+# Install dependencies
 uv sync
 
-# Lint
-uv run ruff check .
-uv run ruff format .
+# Test reward models locally
+make test
+
+# Local training smoke test (RTX 3090 / 24GB)
+make local config=gec_typix_700m.yaml
+
+# Modal deployment (A100)
+make fine-tune config=gec_typix_700m.yaml
 ```
 
 ## Architecture
 
-The training framework has three components:
-1. **GRPOTrainer** (trl library) - Runs on GPU for GRPO optimization
-2. **vLLM server** - Generates rollouts with LFM2-350M (colocated on same GPU)
-3. **BrowserGym environment** - Runs as a Hugging Face Space (CPU-based Docker container)
+### Composite Reward Function
+```
+Reward = 0.6 × GRECO + 0.3 × MPNet - 0.1 × Laziness
+```
+
+- **GRECO (60%)**: DeBERTa-based quality estimator (`mrqorib/grammaticality`)
+- **MPNet (30%)**: Semantic similarity preservation (`all-mpnet-base-v2`)
+- **Laziness (10%)**: Edit distance penalty for copying input unchanged
 
 ### Key Files
-- `src/browser_control/fine_tune.py` - Main training loop with Modal GPU deployment
-- `src/browser_control/config.py` - `FineTuningConfig` pydantic model for all hyperparameters
-- `src/browser_control/modal_infra.py` - Modal serverless GPU setup
-- `configs/*.yaml` - Training configurations (model, learning rate, LoRA settings, etc.)
+- `src/gec/fine_tune.py` - GRPO training with TRL
+- `src/gec/rewards.py` - Composite reward: `GECRewardModel`, `build_gec_reward_func`
+- `src/gec/dataset.py` - Load HF dataset, extract `<Text>` tags
+- `src/gec/config.py` - `GECConfig` pydantic model
+- `configs/gec_typix_700m.yaml` - Training config
 
 ### Training Flow
-1. `rollout_func()` executes episodes using the language model
-2. For each step: model observes accessibility tree (axtree) → generates action → environment returns reward
-3. GRPO uses relative performance within rollout groups to update policy
-
-### Config Structure
-YAML configs in `configs/` control:
-- Model selection (`model_name`)
-- LoRA parameters (`use_peft`, `lora_r`, `lora_alpha`, `lora_target_modules`)
-- vLLM settings (`use_vllm`, `vllm_mode`, `vllm_gpu_memory_utilization`)
-- Training hyperparameters (`learning_rate`, `num_generations`, `max_steps`)
+1. Load dataset from HuggingFace (`moogin/typix-hq-grannar`)
+2. GRPOTrainer generates N corrections per input
+3. Reward function scores each with GRECO + MPNet + laziness
+4. GRPO uses relative performance to update policy
 
 ## Infrastructure
 
-Uses Modal for serverless GPU (A100). Requires:
-- `wandb-secret` Modal secret for W&B logging
-- HuggingFace Space running BrowserGym at URL specified in config
+- **Local**: `--local` flag for smoke testing on consumer GPU
+- **Modal**: Serverless A100 deployment, requires `wandb-secret`
 
-## Subproject: greco/
+## Dependencies
 
-Separate NLP project for Grammatical Error Correction quality estimation. Has its own dependencies in `greco/requirements.txt` (Python 2 required for m2scorer).
+- `transformers>=4.55.0` (required for LFM2)
+- `trl>=0.25.1` (GRPO implementation)
+- `sentence-transformers` (MPNet)
+- GRECO loaded from `greco/models.py` with `use_fast=False`
