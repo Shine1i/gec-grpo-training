@@ -5,7 +5,7 @@
 seed: 42
 
 # Language Model
-model_name: moogin/typix-mixed-epo
+model_name: moogin/typix-grammar-small
 max_seq_length: 512
 system_prompt: |
   You are a grammatical error correction assistant.
