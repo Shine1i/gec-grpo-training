@@ -64,7 +64,7 @@ try:
     print(f"Checkpoint path: {checkpoint_path}")
 
     print("Loading weights...")
-    greco.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    greco.load_state_dict(torch.load(checkpoint_path, map_location=device), strict=False)
     greco.eval()
 
     print("\nGRECO loaded successfully!")

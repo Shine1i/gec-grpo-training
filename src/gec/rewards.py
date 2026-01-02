@@ -30,7 +30,9 @@ class GECRewardModel:
         print(f"Loading GRECO from {greco_model_name}...")
         self.greco = GRECO(lm="microsoft/deberta-v3-large").to(self.device)
         checkpoint_path = hf_hub_download(greco_model_name, "pytorch_model.bin")
-        self.greco.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+        self.greco.load_state_dict(
+            torch.load(checkpoint_path, map_location=self.device), strict=False
+        )
         self.greco.eval()
 
         # Load MPNet for semantic similarity
