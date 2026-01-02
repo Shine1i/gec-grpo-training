@@ -10,19 +10,24 @@ app = modal.App("gec-sft-stage1")
 # Modal image with unsloth and dependencies
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
     .pip_install(
-        "torch>=2.4.0",
-        "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
+        "torch==2.4.0",
+        "triton",
         "xformers",
-        "trl>=0.12.0",
-        "peft",
-        "accelerate",
         "bitsandbytes",
+        "accelerate",
+        "peft",
+        "trl>=0.12.0",
         "transformers>=4.46.0",
         "datasets",
         "wandb",
         "huggingface_hub",
+        "hf_transfer",
+        "sentencepiece",
+        "protobuf",
     )
+    .pip_install("unsloth")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 
