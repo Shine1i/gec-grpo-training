@@ -52,14 +52,9 @@ def load_gec_dataset(dataset_name: str, size: Optional[int] = None) -> Dataset:
     return Dataset.from_dict({"prompt": prompts, "reference": references})
 
 
-def make_gec_prompt(incorrect_text: str, system_prompt: str, tokenizer) -> str:
-    """Create chat-formatted prompt for GEC generation."""
-    messages = [
+def make_gec_messages(incorrect_text: str, system_prompt: str) -> list[dict[str, str]]:
+    """Create chat messages for GEC generation."""
+    return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Correct the following text:\n{incorrect_text}"},
     ]
-    return tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=False,
-    )

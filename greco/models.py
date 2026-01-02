@@ -39,9 +39,25 @@ class GRECO(nn.Module):
 
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
 
-    def __init__(self, lm, tokenizer=None, dropout=0, alpha=1, beta=1, gamma=1, epsilon=0,
-        label_weight=None, gap_weight=None, edit_weight=None, freeze_lm=False,
-        ranking_loss='naive', estimator_loss='h_listnet', rank_multiplier=1, rank_sample=None):
+    def __init__(
+        self,
+        lm,
+        tokenizer=None,
+        dropout=0,
+        alpha=1,
+        beta=1,
+        gamma=1,
+        epsilon=0,
+        label_weight=None,
+        gap_weight=None,
+        edit_weight=None,
+        freeze_lm=False,
+        ranking_loss="naive",
+        estimator_loss="h_listnet",
+        rank_multiplier=1,
+        rank_sample=None,
+        use_fast=True,
+    ):
         super(GRECO, self).__init__()
 
         self.lm = AutoModel.from_pretrained(lm)
@@ -51,8 +67,11 @@ class GRECO(nn.Module):
         tokenizer = tokenizer if tokenizer is not None else lm
         add_prefix_space = True if 'roberta' in tokenizer.lower() else False
         self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer, do_lower_case=False, use_fast=True,
-            add_prefix_space=add_prefix_space)
+            tokenizer,
+            do_lower_case=False,
+            use_fast=use_fast,
+            add_prefix_space=add_prefix_space,
+        )
         self.dropout = nn.Dropout(dropout)
         self.config = self.lm.config
         hidden_size = self.lm.config.hidden_size

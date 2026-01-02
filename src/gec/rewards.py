@@ -1,12 +1,11 @@
 from difflib import SequenceMatcher
+from pathlib import Path
+import sys
 
 import torch
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
-
-import sys
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "greco"))
 from models import GRECO
@@ -28,7 +27,9 @@ class GECRewardModel:
 
         # Load GRECO from HuggingFace
         print(f"Loading GRECO from {greco_model_name}...")
-        self.greco = GRECO(lm="microsoft/deberta-v3-large").to(self.device)
+        self.greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=False).to(
+            self.device
+        )
         checkpoint_path = hf_hub_download(greco_model_name, "pytorch_model.bin")
         self.greco.load_state_dict(
             torch.load(checkpoint_path, map_location=self.device), strict=False
@@ -101,9 +102,51 @@ class GECRewardModel:
         return rewards.tolist()
 
 
-def reward_completion(completions: list[str], **kwargs) -> list[float]:
-    """Passthrough reward function - actual rewards computed in rollout."""
-    rewards = kwargs.get("completion_reward") if kwargs else None
-    if rewards is None:
-        return [0.0 for _ in completions]
-    return [float(r) for r in rewards]
+def _flatten_message_content(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                if "text" in part:
+                    parts.append(str(part["text"]))
+                else:
+                    parts.append(str(part.get("content", "")))
+            else:
+                parts.append(str(part))
+        return "".join(parts)
+    return str(content)
+
+
+def _completion_to_text(completion) -> str:
+    if isinstance(completion, list):
+        if not completion:
+            return ""
+        last_message = completion[-1]
+        if isinstance(last_message, dict):
+            return _flatten_message_content(last_message.get("content"))
+    if isinstance(completion, dict):
+        return _flatten_message_content(completion.get("content"))
+    if completion is None:
+        return ""
+    return str(completion)
+
+
+def build_gec_reward_func(reward_model: GECRewardModel):
+    """Build a GRPO-compatible reward function using the composite GEC reward."""
+
+    def reward_func(prompts, completions, source, **kwargs) -> list[float]:
+        completion_texts = [_completion_to_text(c) for c in completions]
+        if isinstance(source, str):
+            sources = [source] * len(completion_texts)
+        else:
+            sources = list(source)
+        if len(sources) != len(completion_texts):
+            raise ValueError(
+                "Mismatched sources and completions: "
+                f"{len(sources)} vs {len(completion_texts)}"
+            )
+        return reward_model.compute_rewards(sources, completion_texts)
+
+    return reward_func

@@ -57,7 +57,7 @@ try:
     from models import GRECO
 
     print("\nLoading GRECO from mrqorib/grammaticality...")
-    greco = GRECO(lm="microsoft/deberta-v3-large").to(device)
+    greco = GRECO(lm="microsoft/deberta-v3-large", use_fast=False).to(device)
 
     print("Downloading checkpoint from HuggingFace...")
     checkpoint_path = hf_hub_download("mrqorib/grammaticality", "pytorch_model.bin")
@@ -170,6 +170,7 @@ print("=" * 60)
 
 try:
     print("\n--- Composite Reward Scores ---")
+    composite_values = []
     for i, case in enumerate(test_cases):
         source = case["source"]
         print(f"\nSource {i+1}: \"{source}\"")
@@ -191,6 +192,7 @@ try:
 
             composite = 0.6 * g + 0.3 * s - 0.1 * l
 
+            composite_values.append(composite)
             print(f"  [{composite:.4f}] G={g:.3f} S={s:.3f} L={l:.3f} | \"{corr}\"")
 
     print("\nComposite reward interpretation:")
@@ -198,6 +200,9 @@ try:
     print("  - Perfect correction should score highest")
     print("  - Lazy (no change) should be penalized")
     print("  - Hallucination should have low semantic score")
+
+    if not any(abs(val) > 1e-6 for val in composite_values):
+        raise RuntimeError("Composite reward smoke test failed: all rewards are zero")
 
 except Exception as e:
     print(f"\nComposite reward test FAILED: {e}")
