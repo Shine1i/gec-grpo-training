@@ -115,9 +115,10 @@ class GECRewardModel:
         semantic_scores = self.compute_semantic_similarity(sources, hypotheses)
         edit_penalties = self.compute_edit_penalty(sources, hypotheses)
 
-        # Only penalize edits that don't improve quality (gain <= 0)
+        # Only penalize edits that don't meaningfully improve quality (gain <= epsilon)
+        # Small epsilon accounts for GRECO noise on minor edits
         conditional_penalties = torch.where(
-            greco_gain <= 0, edit_penalties, torch.zeros_like(edit_penalties)
+            greco_gain <= 0.01, edit_penalties, torch.zeros_like(edit_penalties)
         )
 
         rewards = (
