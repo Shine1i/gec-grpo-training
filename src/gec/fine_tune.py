@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 
-import modal
 import typer
 from datasets import Dataset
 from peft import LoraConfig
@@ -14,12 +13,6 @@ from .modal_infra import (
     get_retries,
     get_secrets,
     get_volume,
-)
-
-# Mount greco directory for GRECO model
-greco_mount = modal.Mount.from_local_dir(
-    Path(__file__).parent.parent.parent / "greco",
-    remote_path="/root/greco",
 )
 from .config import GECConfig
 from .dataset import load_gec_dataset, make_gec_messages
@@ -168,7 +161,6 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
         "/hf_model_cache": hf_models_volume,
         "/model_checkpoints": model_checkpoints_volume,
     },
-    mounts=[greco_mount],
     secrets=get_secrets(),
     timeout=2 * 60 * 60,
     retries=get_retries(max_retries=1),

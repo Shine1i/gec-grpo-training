@@ -20,6 +20,7 @@ def get_docker_image() -> modal.Image:
             "huggingface_hub",
         )
         .env({"HF_HOME": "/hf_model_cache"})
+        .add_local_dir("greco", "/root/greco")
     )
     return docker_image
 
