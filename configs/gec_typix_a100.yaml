@@ -21,13 +21,13 @@ dataset_size: 10000  # 10k stratified sample
 # Training hyperparameters
 learning_rate: 5.0e-6
 warmup_steps: 200
-max_steps: 2500  # ~3 epochs with larger batch
-gradient_accumulation_steps: 4  # effective batch = 96
+max_steps: 3750  # ~3 epochs with larger batch
+gradient_accumulation_steps: 4  # effective batch = 64
 
 # vLLM inference (A100 optimized)
 per_device_train_batch_size: 8
-num_generations: 12
-generation_batch_size: 12
+num_generations: 8
+generation_batch_size: 8
 max_completion_length: 256
 use_vllm: true
 vllm_mode: "colocate"
