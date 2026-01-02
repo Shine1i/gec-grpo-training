@@ -64,5 +64,5 @@ wandb_enabled: true
 wandb_project_name: "gec-fine-tune-with-grpo"
 logging_steps: 10
 save_steps: 250
-save_total_limit: 3
+save_total_limit: 10
 push_to_hf: false
