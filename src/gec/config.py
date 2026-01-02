@@ -65,7 +65,15 @@ class GECConfig(BaseSettings):
     lora_dropout: float = 0.05
     lora_bias: str = "none"
     use_rslora: bool = False
-    lora_target_modules: str | list[str] = "all-linear"
+    lora_target_modules: list[str] = [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ]
 
     @classmethod
     def from_yaml(cls, file_name: str) -> Self:

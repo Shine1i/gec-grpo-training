@@ -52,7 +52,14 @@ lora_alpha: 64
 lora_dropout: 0.05
 lora_bias: "none"
 use_rslora: false
-lora_target_modules: "all-linear"
+lora_target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
 
 # Experiment tracking
 wandb_enabled: true
