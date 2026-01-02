@@ -13,9 +13,6 @@ def get_docker_image() -> modal.Image:
             # Base training dependencies
             "trl[vllm]",
             "transformers>=4.55",
-            "git+https://github.com/meta-pytorch/OpenEnv.git@bf5e968286e0d49cdc03fd904d48faff4b15a437",
-            "openenv_core==0.1.1",
-            "liger-kernel",
             "wandb",
             "peft>=0.13.0",
             # GEC-specific dependencies
