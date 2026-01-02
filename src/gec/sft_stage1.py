@@ -19,7 +19,6 @@ image = (
     )
     .pip_install(
         "flash-attn",
-        extra_options="--no-build-isolation",
     )
     .pip_install(
         "unsloth",
