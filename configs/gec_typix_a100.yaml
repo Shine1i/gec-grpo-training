@@ -66,4 +66,6 @@ lora_target_modules:
 wandb_enabled: true
 wandb_project_name: "gec-fine-tune-with-grpo"
 logging_steps: 10
+save_steps: 250
+save_total_limit: 3
 push_to_hf: false

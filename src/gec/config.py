@@ -58,6 +58,10 @@ class GECConfig(BaseSettings):
     logging_steps: int
     push_to_hf: Optional[bool] = True
 
+    # Checkpointing
+    save_steps: int = 100
+    save_total_limit: int = 3
+
     # LoRA parameters
     use_peft: bool = False
     lora_r: int = 16

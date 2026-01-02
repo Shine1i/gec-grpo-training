@@ -126,6 +126,8 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
         vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,
         output_dir=output_dir,
         logging_steps=config.logging_steps,
+        save_steps=config.save_steps,
+        save_total_limit=config.save_total_limit,
         report_to="wandb" if config.wandb_enabled else "none",
         remove_unused_columns=False,
     )
