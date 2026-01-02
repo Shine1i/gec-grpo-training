@@ -98,27 +98,36 @@ class GECRewardModel:
         """
         Compute gain-based composite reward.
 
-        Reward = greco_weight * GRECO_GAIN + semantic_weight * similarity - edit_weight * has_edit
+        Reward = greco_weight * GRECO_GAIN + semantic_weight * similarity - edit_weight * conditional_penalty
 
         Where GRECO_GAIN = GRECO(hypothesis) - GRECO(source)
-        This naturally handles clean samples (gain ≈ 0) and penalizes useless edits.
+        Edit penalty only applies when gain <= 0 (edits that don't improve quality).
         """
-        # Compute GRECO for both source and hypothesis
-        source_greco = self.compute_source_greco_scores(sources)
+        # Cache source GRECO per unique source (same source has N completions in GRPO)
+        unique_sources = list(dict.fromkeys(sources))
+        unique_scores = self.compute_source_greco_scores(unique_sources)
+        source_greco_map = {s: score.item() for s, score in zip(unique_sources, unique_scores)}
+        source_greco = torch.tensor([source_greco_map[s] for s in sources])
+
         hyp_greco = self.compute_greco_scores(sources, hypotheses)
         greco_gain = hyp_greco - source_greco
 
         semantic_scores = self.compute_semantic_similarity(sources, hypotheses)
         edit_penalties = self.compute_edit_penalty(sources, hypotheses)
 
+        # Only penalize edits that don't improve quality (gain <= 0)
+        conditional_penalties = torch.where(
+            greco_gain <= 0, edit_penalties, torch.zeros_like(edit_penalties)
+        )
+
         rewards = (
             self.greco_weight * greco_gain
             + self.semantic_weight * semantic_scores
-            - self.laziness_weight * edit_penalties
+            - self.laziness_weight * conditional_penalties
         )
 
         # Log first 3 samples for debugging
-        print(f"[Reward] SrcGRECO: {source_greco[:3].tolist()}, HypGRECO: {hyp_greco[:3].tolist()}, Gain: {greco_gain[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, EditPen: {edit_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
+        print(f"[Reward] SrcGRECO: {source_greco[:3].tolist()}, HypGRECO: {hyp_greco[:3].tolist()}, Gain: {greco_gain[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, EditPen: {conditional_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
 
         return rewards.tolist()
 
