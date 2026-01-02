@@ -8,26 +8,24 @@ import modal
 app = modal.App("gec-sft-stage1")
 
 # Modal image with unsloth and dependencies
+# Install order matters: torch+triton first, then unsloth
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .pip_install(
-        "torch==2.4.0",
+        "torch",
         "triton",
+    )
+    .pip_install(
+        "unsloth",
         "xformers",
-        "bitsandbytes",
-        "accelerate",
-        "peft",
-        "trl>=0.12.0",
-        "transformers>=4.46.0",
+    )
+    .pip_install(
         "datasets",
         "wandb",
         "huggingface_hub",
         "hf_transfer",
-        "sentencepiece",
-        "protobuf",
     )
-    .pip_install("unsloth")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 
@@ -37,7 +35,7 @@ volume = modal.Volume.from_name("gec-sft-checkpoints", create_if_missing=True)
 
 @app.function(
     image=image,
-    gpu=modal.gpu.A100(size="40GB"),
+    gpu="A100-40GB",
     timeout=7200,  # 2 hours
     volumes={"/checkpoints": volume},
     secrets=[modal.Secret.from_name("wandb-secret"), modal.Secret.from_name("hf-secret")],
