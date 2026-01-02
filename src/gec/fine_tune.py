@@ -1,5 +1,6 @@
 import os
 
+import typer
 from datasets import Dataset
 from peft import LoraConfig
 from trl import GRPOTrainer, GRPOConfig
@@ -166,7 +167,7 @@ def fine_tune(config: GECConfig) -> None:
 
 
 @app.local_entrypoint()
-def main(config_file_name: str, local: bool = False):
+def modal_main(config_file_name: str, local: bool = False):
     config = GECConfig.from_yaml(file_name=config_file_name)
 
     try:
@@ -183,5 +184,26 @@ def main(config_file_name: str, local: bool = False):
         raise e
 
 
+cli = typer.Typer()
+
+
+@cli.command()
+def main(
+    config_file_name: str = typer.Option(..., "--config-file-name", "-c"),
+    local: bool = typer.Option(False, "--local", "-l"),
+):
+    """Run GEC fine-tuning with GRPO."""
+    config = GECConfig.from_yaml(file_name=config_file_name)
+
+    if local:
+        print("Running local GEC fine-tune...")
+        config = _apply_local_overrides(config)
+        run_fine_tune(config, local=True)
+        print("Local GEC fine-tuning completed successfully!")
+    else:
+        print("For Modal deployment, use: modal run -m src.gec.fine_tune")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    cli()
