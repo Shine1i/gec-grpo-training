@@ -9,10 +9,7 @@ seed: 42
 model_name: moogin/typix-grammar-large
 max_seq_length: 512
 system_prompt: |
-  You are a grammatical error correction assistant.
-  Correct any spelling and grammatical errors in the given text.
-  Make minimal changes. Preserve the original meaning.
-  Output only the corrected text, nothing else.
+  You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text.
 
 # Dataset (HuggingFace)
 dataset_name: moogin/typix-hq-grannar

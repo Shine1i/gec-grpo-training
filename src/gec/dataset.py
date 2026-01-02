@@ -121,8 +121,8 @@ def load_gec_dataset(dataset_name: str, size: Optional[int] = None) -> Dataset:
 
 
 def make_gec_messages(incorrect_text: str, system_prompt: str) -> list[dict[str, str]]:
-    """Create chat messages for GEC generation."""
+    """Create chat messages for GEC generation matching SFT format."""
     return [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Correct the following text:\n{incorrect_text}"},
+        {"role": "user", "content": f"Fix spelling and grammar. Make minimal changes. Return only the corrected text:\n<Text>\n{incorrect_text}\n</Text>"},
     ]
