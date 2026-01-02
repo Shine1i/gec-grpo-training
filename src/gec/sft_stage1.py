@@ -8,13 +8,18 @@ import modal
 app = modal.App("gec-sft-stage1")
 
 # Modal image with unsloth and dependencies
-# Install order matters: torch+triton first, then unsloth
+# Install order: torch+triton -> flash-attn -> unsloth
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git")
+    .apt_install("git", "ninja-build")
     .pip_install(
-        "torch",
+        "torch==2.5.1",
         "triton",
+        extra_index_url="https://download.pytorch.org/whl/cu124",
+    )
+    .pip_install(
+        "flash-attn",
+        extra_options="--no-build-isolation",
     )
     .pip_install(
         "unsloth",
