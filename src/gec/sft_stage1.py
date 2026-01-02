@@ -47,11 +47,13 @@ volume = modal.Volume.from_name("gec-sft-checkpoints", create_if_missing=True)
 def train_stage1():
     import os
     import torch
+    # Import unsloth FIRST for optimizations
+    from unsloth import FastLanguageModel
+    from unsloth.chat_templates import get_chat_template, train_on_responses_only
+    # Then other imports
     from datasets import load_dataset
     from transformers import EarlyStoppingCallback
     from trl import SFTTrainer, SFTConfig
-    from unsloth import FastLanguageModel
-    from unsloth.chat_templates import get_chat_template, train_on_responses_only
     import wandb
 
     # Config
@@ -144,10 +146,10 @@ def train_stage1():
         seed=42,
     )
 
-    # Create trainer
+    # Create trainer (TRL 0.24+ uses processing_class instead of tokenizer)
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         args=training_args,
