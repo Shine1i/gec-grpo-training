@@ -26,12 +26,12 @@ make fine-tune config=gec_typix_700m.yaml
 
 ### Composite Reward Function
 ```
-Reward = 0.6 × GRECO + 0.3 × MPNet - 0.1 × Laziness
+Reward = 0.6 × GRECO_GAIN + 0.3 × MPNet - 0.1 × HasEdit
 ```
 
-- **GRECO (60%)**: DeBERTa-based quality estimator (`mrqorib/grammaticality`)
+- **GRECO_GAIN (60%)**: `GRECO(output) - GRECO(input)` - rewards improvement, not absolute quality
 - **MPNet (30%)**: Semantic similarity preservation (`all-mpnet-base-v2`)
-- **Laziness (10%)**: Edit distance penalty for copying input unchanged
+- **HasEdit (10%)**: Binary penalty (1 if edited, 0 if unchanged) - discourages unnecessary edits
 
 ### Key Files
 - `src/gec/fine_tune.py` - GRPO training with TRL
