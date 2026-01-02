@@ -27,6 +27,7 @@ class GECConfig(BaseSettings):
     learning_rate: float
     warmup_steps: int
     max_steps: int
+    gradient_accumulation_steps: int = 8
 
     # vLLM inference
     per_device_train_batch_size: int
@@ -36,6 +37,9 @@ class GECConfig(BaseSettings):
     use_vllm: bool
     vllm_mode: str
     vllm_gpu_memory_utilization: float
+
+    # GRPO specific
+    beta: float = 0.04  # KL penalty
 
     # Reward weights (should sum to 1.0)
     greco_weight: float = 0.6

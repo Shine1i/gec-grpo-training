@@ -1,5 +1,5 @@
 #########################################################
-# GEC with moogin/typix-mixed-epo (LFM2-700M fine-tuned)
+# GEC with moogin/typix-grammar-small (1.2B Gemma-based)
 #########################################################
 
 seed: 42
@@ -15,21 +15,25 @@ system_prompt: |
 
 # Dataset (HuggingFace)
 dataset_name: moogin/typix-hq-grannar
-dataset_size: 1000  # null for full dataset
+dataset_size: 10000  # 10k stratified sample
 
 # Training hyperparameters
-learning_rate: 5.0e-5
-warmup_steps: 50
-max_steps: 500
+learning_rate: 5.0e-6
+warmup_steps: 200
+max_steps: 7500  # ~3 epochs (10k/4 * 3)
+gradient_accumulation_steps: 8  # effective batch = 32
 
 # vLLM inference
 per_device_train_batch_size: 4
-num_generations: 4
-generation_batch_size: 4
+num_generations: 12
+generation_batch_size: 12
 max_completion_length: 256
 use_vllm: true
 vllm_mode: "colocate"
 vllm_gpu_memory_utilization: 0.3
+
+# GRPO specific
+beta: 0.04  # KL penalty
 
 # Reward weights
 greco_weight: 0.6
@@ -42,8 +46,8 @@ mpnet_model: sentence-transformers/all-mpnet-base-v2
 
 # LoRA configuration
 use_peft: true
-lora_r: 16
-lora_alpha: 32
+lora_r: 32
+lora_alpha: 64
 lora_dropout: 0.05
 lora_bias: "none"
 use_rslora: false
