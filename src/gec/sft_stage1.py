@@ -18,7 +18,7 @@ image = (
         extra_index_url="https://download.pytorch.org/whl/cu124",
     )
     .pip_install(
-        "flash-attn",
+        "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.5cxx11abiFALSE-cp311-cp311-linux_x86_64.whl",
     )
     .pip_install(
         "unsloth",
