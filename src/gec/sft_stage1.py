@@ -40,13 +40,14 @@ volume = modal.Volume.from_name("gec-sft-checkpoints", create_if_missing=True)
 @app.function(
     image=image,
     gpu="A100-40GB",
-    timeout=7200,  # 2 hours
+    timeout=14400,  # 4 hours
     volumes={"/checkpoints": volume},
     secrets=[modal.Secret.from_name("wandb-secret"), modal.Secret.from_name("hf-secret")],
 )
-def train_stage1():
+def train_stage1(resume: bool = False):
     import os
     import torch
+    from pathlib import Path
     # Import unsloth FIRST for optimizations
     from unsloth import FastLanguageModel
     from unsloth.chat_templates import get_chat_template, train_on_responses_only
@@ -70,11 +71,27 @@ def train_stage1():
     NUM_EPOCHS = 1
     WARMUP_RATIO = 0.05
     EVAL_STEPS = 500
-    SAVE_STEPS = 1000
+    SAVE_STEPS = 500  # Save more often
     EARLY_STOPPING_PATIENCE = 3
 
-    # Init wandb
-    wandb.init(project="gec-sft-stage1", name="lfm2-1.2b-full-ft")
+    # Find latest checkpoint if resuming
+    checkpoint_dir = Path("/checkpoints/stage1")
+    resume_from = None
+    if resume and checkpoint_dir.exists():
+        checkpoints = sorted(
+            checkpoint_dir.glob("checkpoint-*"),
+            key=lambda p: int(p.name.split("-")[1]),
+        )
+        if checkpoints:
+            resume_from = str(checkpoints[-1])
+            print(f"Resuming from checkpoint: {resume_from}")
+
+    # Init wandb (resume if checkpoint exists)
+    wandb.init(
+        project="gec-sft-stage1",
+        name="lfm2-1.2b-full-ft",
+        resume="allow" if resume_from else None,
+    )
 
     print(f"Loading model: {MODEL_NAME}")
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -132,7 +149,7 @@ def train_stage1():
         # Saving
         save_strategy="steps",
         save_steps=SAVE_STEPS,
-        save_total_limit=10,
+        save_total_limit=5,  # Keep last 5 checkpoints
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -179,9 +196,9 @@ def train_stage1():
     print(tokenizer.decode([tokenizer.pad_token_id if x == -100 else x for x in labels]).replace(tokenizer.pad_token, " "))
     print("=" * 50)
 
-    # Train
+    # Train (resume from checkpoint if available)
     print("\nStarting training...")
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from)
 
     # Save best model
     print("\nSaving best model...")
@@ -202,6 +219,7 @@ def train_stage1():
 
 
 @app.local_entrypoint()
-def main():
-    result = train_stage1.remote()
+def main(resume: bool = False):
+    print(f"Starting Stage 1 SFT (resume={resume})")
+    result = train_stage1.remote(resume=resume)
     print(f"Training result: {result}")
