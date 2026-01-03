@@ -70,8 +70,8 @@ def train_stage1(resume: bool = False):
     LEARNING_RATE = 5e-6
     NUM_EPOCHS = 1
     WARMUP_RATIO = 0.05
-    EVAL_STEPS = 200
-    SAVE_STEPS = 200  # Save more often
+    EVAL_STEPS = 400
+    SAVE_STEPS = 400  # ~11 evals for 582k dataset
     EARLY_STOPPING_PATIENCE = 3
 
     # Find latest checkpoint if resuming
