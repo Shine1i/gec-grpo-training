@@ -120,7 +120,8 @@ def train_stage1(resume: bool = False):
             text = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=False
             )
-            texts.append(text)
+            # Remove BOS token to avoid double BOS
+            texts.append(text.removeprefix(tokenizer.bos_token or ""))
         return {"text": texts}
 
     train_dataset = train_dataset.map(formatting_func, batched=True, num_proc=4)
