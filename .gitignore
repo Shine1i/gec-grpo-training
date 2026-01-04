@@ -1,0 +1,7 @@
+.hf_cache/
+__pycache__/
+local_checkpoints/
+merged_models/
+modal_ckekpoints/
+uv.lock
+wandb/

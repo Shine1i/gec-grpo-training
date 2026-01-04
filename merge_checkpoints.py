@@ -44,7 +44,7 @@ def main():
     parser.add_argument(
         "--checkpoints-dir",
         type=Path,
-        default=Path("modal_checkpoints/typix-grammar-large-gec-20260102-190540"),
+        default=Path("modal_ckekpoints"),
     )
     parser.add_argument(
         "--output-dir",
@@ -54,7 +54,7 @@ def main():
     parser.add_argument(
         "--base-model",
         type=str,
-        default="moogin/typix-grammar-large",
+        default="moogin/typix-mixed-epo",
     )
     args = parser.parse_args()
 

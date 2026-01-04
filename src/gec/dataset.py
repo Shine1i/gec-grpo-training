@@ -127,5 +127,5 @@ def make_gec_messages(incorrect_text: str, system_prompt: str) -> list[dict[str,
     """Create chat messages for GEC generation matching SFT format."""
     return [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Fix spelling and grammar. Make minimal changes. Return only the corrected text:\n<Text>\n{incorrect_text}\n</Text>"},
+        {"role": "user", "content": f"Fix spelling, grammar, and punctuation. Make minimal changes and preserve meaning. If the text is already correct, return it unchanged. Return only the corrected text:\n<Text>\n{incorrect_text}\n</Text>"},
     ]

@@ -6,10 +6,9 @@
 seed: 42
 
 # Language Model
-model_name: moogin/typix-grammar-large
+model_name: moogin/Typix-medium
 max_seq_length: 512
-system_prompt: |
-  You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text.
+system_prompt: "You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text."
 
 # Dataset (HuggingFace)
 dataset_name: moogin/typix-hq-grannar
