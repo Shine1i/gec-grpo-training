@@ -11,8 +11,8 @@ max_seq_length: 512
 system_prompt: "You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text."
 
 # Dataset (HuggingFace)
-dataset_name: moogin/typix-hq-grannar
-dataset_size: 10000  # 10k stratified sample
+dataset_name: moogin/typix-grpo
+dataset_size: null  # use full dataset (already stratified)
 
 # Training hyperparameters
 learning_rate: 5.0e-6
@@ -37,6 +37,7 @@ temperature: 1.1  # Sampling temperature for diverse generations
 greco_weight: 0.6
 semantic_weight: 0.3
 laziness_weight: 0.1
+gain_epsilon: 0.02
 
 # Reward models (HuggingFace)
 greco_model_name: mrqorib/grammaticality
