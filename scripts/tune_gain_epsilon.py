@@ -287,8 +287,10 @@ def main() -> None:
     edit_penalties = reward_model.compute_edit_penalty(repeated_sources, completions)
     if is_clean is not None:
         is_clean_tensor = torch.tensor(repeated_is_clean, dtype=torch.bool)
+        is_clean_prompt = torch.tensor(is_clean, dtype=torch.bool)
     else:
         is_clean_tensor = None
+        is_clean_prompt = None
     if applied_edits is not None:
         applied_edits_tensor = torch.tensor(repeated_applied_edits)
     else:
@@ -302,27 +304,56 @@ def main() -> None:
         rewards: torch.Tensor,
         improved: torch.Tensor,
         non_improving_edits: torch.Tensor,
+        prompt_mask: torch.Tensor | None = None,
     ) -> None:
+        all_rewards = rewards
+        all_improved = improved
+        all_non_improving = non_improving_edits
+
+        grouped_rewards = all_rewards.view(num_prompts, num_generations)
+        grouped_edits = edit_penalties.view(num_prompts, num_generations)
+        subset_edit_penalties = edit_penalties
+
+        if prompt_mask is not None:
+            completion_mask = prompt_mask.repeat_interleave(num_generations)
+            rewards = all_rewards[completion_mask]
+            improved = all_improved[completion_mask]
+            non_improving_edits = all_non_improving[completion_mask]
+            subset_edit_penalties = edit_penalties[completion_mask]
+            grouped_rewards = grouped_rewards[prompt_mask]
+            grouped_edits = grouped_edits[prompt_mask]
+        else:
+            rewards = all_rewards
+            improved = all_improved
+            non_improving_edits = all_non_improving
+
+        if rewards.numel() == 0:
+            print(f"  {label}reward_mean: n/a (no samples)")
+            return
+
         reward_mean = rewards.mean().item()
-        reward_std = rewards.std().item()
+        reward_std = rewards.std().item() if rewards.numel() > 1 else 0.0
         frac_improved = improved.float().mean().item()
-        frac_edits = edit_penalties.float().mean().item()
+        frac_edits = subset_edit_penalties.float().mean().item()
         frac_non_improving_edits = non_improving_edits.float().mean().item()
         frac_edited_positive = (
-            ((rewards > 0) & (edit_penalties > 0)).float().mean().item()
+            ((rewards > 0) & (subset_edit_penalties > 0)).float().mean().item()
         )
 
-        grouped_rewards = rewards.view(num_prompts, num_generations)
-        grouped_edits = edit_penalties.view(num_prompts, num_generations)
-        has_copy = (grouped_edits == 0).any(dim=1)
-        copy_rewards = grouped_rewards.clone()
-        copy_rewards[grouped_edits > 0] = -float("inf")
-        best_copy = copy_rewards.max(dim=1).values
-        best_any = grouped_rewards.max(dim=1).values
-        copy_best = (has_copy & (best_copy >= best_any - 1e-6)).float().mean().item()
+        if grouped_rewards.numel() > 0:
+            has_copy = (grouped_edits == 0).any(dim=1)
+            copy_rewards = grouped_rewards.clone()
+            copy_rewards[grouped_edits > 0] = -float("inf")
+            best_copy = copy_rewards.max(dim=1).values
+            best_any = grouped_rewards.max(dim=1).values
+            copy_best = (
+                (has_copy & (best_copy >= best_any - 1e-6)).float().mean().item()
+            )
+        else:
+            copy_best = 0.0
 
         q10, q50, q90 = torch.quantile(
-            rewards, torch.tensor([0.1, 0.5, 0.9])
+            rewards, torch.tensor([0.1, 0.5, 0.9], device=rewards.device)
         ).tolist()
 
         print(f"  {label}reward_mean: {reward_mean:.4f} | reward_std: {reward_std:.4f}")
@@ -356,6 +387,17 @@ def main() -> None:
 
         print(f"\nEpsilon: {epsilon:.4f}")
         summarize("", rewards, improved, non_improving_edits)
+        if is_clean_prompt is not None:
+            summarize(
+                "clean_subset_", rewards, improved, non_improving_edits, is_clean_prompt
+            )
+            summarize(
+                "dirty_subset_",
+                rewards,
+                improved,
+                non_improving_edits,
+                ~is_clean_prompt,
+            )
 
         if args.use_clean_fields and is_clean_tensor is not None:
             if applied_edits_tensor is None:
