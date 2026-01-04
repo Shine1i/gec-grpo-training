@@ -108,6 +108,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
+    parser.add_argument(
+        "--greedy-per-prompt",
+        type=int,
+        default=1,
+        help="Number of greedy candidates per prompt (0 or 1).",
+    )
     parser.add_argument("--use-clean-fields", action="store_true")
     parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
     parser.add_argument("--no-edit-penalty", type=float, default=0.05)
@@ -152,6 +158,11 @@ def main() -> None:
 
     config = GECConfig.from_yaml(file_name=args.config_file_name)
     num_generations = args.num_generations or config.num_generations
+    if args.greedy_per_prompt < 0 or args.greedy_per_prompt > num_generations:
+        raise ValueError("greedy_per_prompt must be between 0 and num_generations.")
+    if args.greedy_per_prompt > 1:
+        raise ValueError("greedy_per_prompt > 1 is not supported for greedy decoding.")
+    sampled_per_prompt = num_generations - args.greedy_per_prompt
 
     dataset = load_gec_dataset(config.dataset_name, None)
     if args.num_samples and len(dataset) > args.num_samples:
@@ -227,34 +238,63 @@ def main() -> None:
         encoded = {k: v.to(device) for k, v in encoded.items() if k != "token_type_ids"}
         input_lens = encoded["attention_mask"].sum(dim=1)
 
+        batch_size = len(source_batch)
+        batch_completions = [[] for _ in range(batch_size)]
+
         with torch.no_grad():
-            generated = model.generate(
-                **encoded,
-                do_sample=True,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                top_k=args.top_k if args.top_k > 0 else 0,
-                max_new_tokens=max_new_tokens,
-                num_return_sequences=num_generations,
-                pad_token_id=tokenizer.eos_token_id,
-            )
+            if args.greedy_per_prompt > 0:
+                greedy_out = model.generate(
+                    **encoded,
+                    do_sample=False,
+                    max_new_tokens=max_new_tokens,
+                    num_return_sequences=1,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+                for idx, (seq, in_len) in enumerate(
+                    zip(greedy_out, input_lens, strict=True)
+                ):
+                    completion_ids = seq[int(in_len) :]
+                    batch_completions[idx].append(
+                        tokenizer.decode(completion_ids, skip_special_tokens=True)
+                    )
 
-        input_lens = input_lens.repeat_interleave(num_generations)
-        for seq, in_len in zip(generated, input_lens, strict=True):
-            completion_ids = seq[int(in_len) :]
-            completions.append(
-                tokenizer.decode(completion_ids, skip_special_tokens=True)
-            )
+            if sampled_per_prompt > 0:
+                sampled_out = model.generate(
+                    **encoded,
+                    do_sample=True,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    top_k=args.top_k if args.top_k > 0 else 0,
+                    max_new_tokens=max_new_tokens,
+                    num_return_sequences=sampled_per_prompt,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+                sample_input_lens = input_lens.repeat_interleave(sampled_per_prompt)
+                for j, (seq, in_len) in enumerate(
+                    zip(sampled_out, sample_input_lens, strict=True)
+                ):
+                    completion_ids = seq[int(in_len) :]
+                    prompt_idx = j // sampled_per_prompt
+                    batch_completions[prompt_idx].append(
+                        tokenizer.decode(completion_ids, skip_special_tokens=True)
+                    )
 
-        repeated_sources.extend(
-            [src for src in source_batch for _ in range(num_generations)]
-        )
-        if is_clean is not None:
-            for flag in batch_is_clean:
-                repeated_is_clean.extend([bool(flag)] * num_generations)
-        if applied_edits is not None:
-            for value in batch_applied_edits:
-                repeated_applied_edits.extend([int(value)] * num_generations)
+        for idx, items in enumerate(batch_completions):
+            if len(items) != num_generations:
+                raise ValueError(
+                    "Incorrect number of completions for prompt "
+                    f"{source_batch[idx]!r}: {len(items)} vs {num_generations}"
+                )
+
+        for idx, src in enumerate(source_batch):
+            completions.extend(batch_completions[idx])
+            repeated_sources.extend([src] * num_generations)
+            if is_clean is not None:
+                repeated_is_clean.extend([bool(batch_is_clean[idx])] * num_generations)
+            if applied_edits is not None:
+                repeated_applied_edits.extend(
+                    [int(batch_applied_edits[idx])] * num_generations
+                )
         source_offset += len(source_batch)
 
     reward_model = GECRewardModel(
