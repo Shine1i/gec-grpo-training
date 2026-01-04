@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(cd:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd checkpoint resumption and increase timeout for Stage 1 SFT\n\n- Increase timeout 2h → 4h to handle 1M sample training\n- Add --resume flag to continue from latest checkpoint\n- Save every 500 steps \\(was 1000\\) to minimize loss on timeout\n- Keep last 5 checkpoints\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)",
+      "Bash(git push)"
     ]
   }
 }

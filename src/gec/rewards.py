@@ -1,4 +1,3 @@
-from difflib import SequenceMatcher
 from pathlib import Path
 import sys
 
@@ -30,6 +29,7 @@ class GECRewardModel:
         greco_weight: float = 0.6,
         semantic_weight: float = 0.3,
         laziness_weight: float = 0.1,
+        gain_epsilon: float = 0.02,
         device: str = "cuda",
     ):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -53,6 +53,7 @@ class GECRewardModel:
         self.greco_weight = greco_weight
         self.semantic_weight = semantic_weight
         self.laziness_weight = laziness_weight
+        self.gain_epsilon = gain_epsilon
 
     def compute_greco_scores(
         self, sources: list[str], hypotheses: list[str]
@@ -101,7 +102,8 @@ class GECRewardModel:
         Reward = greco_weight * GRECO_GAIN + semantic_weight * similarity - edit_weight * conditional_penalty
 
         Where GRECO_GAIN = GRECO(hypothesis) - GRECO(source)
-        Edit penalty only applies when gain <= 0 (edits that don't improve quality).
+        Small gains below gain_epsilon are treated as no improvement to avoid GRECO noise.
+        Edit penalty only applies when gain <= gain_epsilon (edits that don't improve quality).
         """
         # Cache source GRECO per unique source (same source has N completions in GRPO)
         unique_sources = list(dict.fromkeys(sources))
@@ -115,20 +117,32 @@ class GECRewardModel:
         semantic_scores = self.compute_semantic_similarity(sources, hypotheses)
         edit_penalties = self.compute_edit_penalty(sources, hypotheses)
 
-        # Only penalize edits that don't meaningfully improve quality (gain <= epsilon)
-        # Small epsilon accounts for GRECO noise on minor edits
+        improved = greco_gain > self.gain_epsilon
+        effective_gain = torch.where(improved, greco_gain, torch.zeros_like(greco_gain))
+        non_improving_edits = (edit_penalties > 0) & (~improved)
+        semantic_scores = torch.where(
+            non_improving_edits,
+            torch.zeros_like(semantic_scores),
+            semantic_scores,
+        )
         conditional_penalties = torch.where(
-            greco_gain <= 0.01, edit_penalties, torch.zeros_like(edit_penalties)
+            non_improving_edits, edit_penalties, torch.zeros_like(edit_penalties)
         )
 
         rewards = (
-            self.greco_weight * greco_gain
+            self.greco_weight * effective_gain
             + self.semantic_weight * semantic_scores
             - self.laziness_weight * conditional_penalties
         )
 
         # Log first 3 samples for debugging
-        print(f"[Reward] SrcGRECO: {source_greco[:3].tolist()}, HypGRECO: {hyp_greco[:3].tolist()}, Gain: {greco_gain[:3].tolist()}, Semantic: {semantic_scores[:3].tolist()}, EditPen: {conditional_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}")
+        print(
+            "[Reward] SrcGRECO: "
+            f"{source_greco[:3].tolist()}, HypGRECO: {hyp_greco[:3].tolist()}, "
+            f"Gain: {greco_gain[:3].tolist()}, EffGain: {effective_gain[:3].tolist()}, "
+            f"Semantic: {semantic_scores[:3].tolist()}, "
+            f"EditPen: {conditional_penalties[:3].tolist()}, Final: {rewards[:3].tolist()}"
+        )
 
         return rewards.tolist()
 

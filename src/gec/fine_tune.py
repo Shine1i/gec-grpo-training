@@ -90,6 +90,7 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
         greco_weight=config.greco_weight,
         semantic_weight=config.semantic_weight,
         laziness_weight=config.laziness_weight,
+        gain_epsilon=config.gain_epsilon,
     )
     reward_func = build_gec_reward_func(reward_model)
 
