@@ -114,6 +114,8 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of greedy candidates per prompt (0 or 1).",
     )
+    parser.add_argument("--print-clean-samples", type=int, default=0)
+    parser.add_argument("--print-dirty-samples", type=int, default=0)
     parser.add_argument("--use-clean-fields", action="store_true")
     parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
     parser.add_argument("--no-edit-penalty", type=float, default=0.05)
@@ -169,6 +171,7 @@ def main() -> None:
         dataset = stratified_sample(dataset, args.num_samples, seed=args.seed)
 
     sources = dataset["prompt"]
+    source_domains = dataset["source"] if "source" in dataset.column_names else None
     is_clean = dataset["is_clean"] if "is_clean" in dataset.column_names else None
     applied_edits = (
         dataset["applied_edits"] if "applied_edits" in dataset.column_names else None
@@ -338,6 +341,52 @@ def main() -> None:
 
     epsilons = [float(x.strip()) for x in args.epsilons.split(",") if x.strip()]
     num_prompts = len(sources)
+
+    def _pick_samples(mask, count, rng):
+        indices = [i for i, flag in enumerate(mask) if flag]
+        if count <= 0 or not indices:
+            return []
+        if count >= len(indices):
+            return indices
+        return rng.sample(indices, count)
+
+    def _print_samples(label, sample_indices):
+        if not sample_indices:
+            return
+        print(f"\nSample {label} prompts ({len(sample_indices)}):")
+        for idx in sample_indices:
+            meta = []
+            if is_clean is not None:
+                meta.append(f"is_clean={bool(is_clean[idx])}")
+            if applied_edits is not None:
+                meta.append(f"applied_edits={int(applied_edits[idx])}")
+            if source_domains is not None:
+                meta.append(f"source={source_domains[idx]}")
+            meta_str = ", ".join(meta)
+            print(f"\n[{label} idx {idx}] {meta_str}")
+            print(f"Input: {sources[idx]}")
+            base = idx * num_generations
+            for j in range(num_generations):
+                pos = base + j
+                completion = completions[pos]
+                edit_flag = "COPY" if edit_penalties[pos].item() == 0 else "EDIT"
+                print(
+                    f"  - {edit_flag} | gain={greco_gain[pos].item():.4f} "
+                    f"sem={semantic_scores[pos].item():.4f} "
+                    f"hyp_greco={hyp_greco[pos].item():.4f}"
+                )
+                print(f"    {completion}")
+
+    if args.print_clean_samples or args.print_dirty_samples:
+        if is_clean is None:
+            raise ValueError("print sample flags require dataset column 'is_clean'.")
+        rng = random.Random(args.seed + 1)
+        clean_indices = _pick_samples(is_clean, args.print_clean_samples, rng)
+        dirty_indices = _pick_samples(
+            [not flag for flag in is_clean], args.print_dirty_samples, rng
+        )
+        _print_samples("clean", clean_indices)
+        _print_samples("dirty", dirty_indices)
 
     def summarize(
         label: str,
