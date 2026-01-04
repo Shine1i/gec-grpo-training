@@ -114,6 +114,8 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of greedy candidates per prompt (0 or 1).",
     )
+    parser.add_argument("--greco-weights", type=str, default=None)
+    parser.add_argument("--semantic-weights", type=str, default=None)
     parser.add_argument("--print-clean-samples", type=int, default=0)
     parser.add_argument("--print-dirty-samples", type=int, default=0)
     parser.add_argument(
@@ -128,6 +130,18 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Scale GRECO gain for improved edits on dirty samples (e.g. 0.2 = +20%).",
     )
+    parser.add_argument(
+        "--dirty-copy-penalty",
+        type=float,
+        default=0.0,
+        help="Penalty applied when dirty samples are copied.",
+    )
+    parser.add_argument(
+        "--dirty-copy-penalty-per-edit",
+        type=float,
+        default=0.0,
+        help="Additional dirty copy penalty scaled by applied_edits.",
+    )
     parser.add_argument("--use-clean-fields", action="store_true")
     parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
     parser.add_argument("--no-edit-penalty", type=float, default=0.05)
@@ -138,6 +152,12 @@ def parse_args() -> argparse.Namespace:
 def batched(items: list, batch_size: int):
     for i in range(0, len(items), batch_size):
         yield items[i : i + batch_size]
+
+
+def parse_float_list(value: str | None):
+    if value is None:
+        return None
+    return [float(x.strip()) for x in value.split(",") if x.strip()]
 
 
 def collect_greco_scores(reward_model, sources, hypotheses, batch_size: int):
@@ -195,6 +215,10 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if device.type == "cuda" else None
+
+    greco_weights = parse_float_list(args.greco_weights) or [config.greco_weight]
+    semantic_weights = parse_float_list(args.semantic_weights) or [config.semantic_weight]
+    weight_pairs = [(g, s) for g in greco_weights for s in semantic_weights]
 
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.padding_side = "left"
@@ -345,6 +369,31 @@ def main() -> None:
         applied_edits_tensor = torch.tensor(repeated_applied_edits)
     else:
         applied_edits_tensor = None
+
+    dirty_copy_penalty = torch.zeros_like(edit_penalties, dtype=torch.float)
+    if args.dirty_copy_penalty > 0 or args.dirty_copy_penalty_per_edit > 0:
+        if is_clean_tensor is None:
+            raise ValueError(
+                "dirty-copy-penalty requires dataset column 'is_clean'."
+            )
+        if applied_edits_tensor is None and args.dirty_copy_penalty_per_edit > 0:
+            raise ValueError(
+                "dirty-copy-penalty-per-edit requires dataset column 'applied_edits'."
+            )
+        is_dirty = ~is_clean_tensor
+        if applied_edits_tensor is not None:
+            is_dirty = is_dirty & (applied_edits_tensor > 0)
+        is_copy = edit_penalties == 0
+        base_penalty = torch.full_like(
+            dirty_copy_penalty, args.dirty_copy_penalty
+        )
+        if args.dirty_copy_penalty_per_edit > 0 and applied_edits_tensor is not None:
+            base_penalty = base_penalty + (
+                applied_edits_tensor.float() * args.dirty_copy_penalty_per_edit
+            )
+        dirty_copy_penalty = torch.where(
+            is_dirty & is_copy, base_penalty, torch.zeros_like(dirty_copy_penalty)
+        )
 
     epsilons = [float(x.strip()) for x in args.epsilons.split(",") if x.strip()]
     num_prompts = len(sources)
@@ -502,26 +551,45 @@ def main() -> None:
                 torch.zeros_like(effective_gain),
             )
 
-        rewards = (
-            config.greco_weight * effective_gain
-            + config.semantic_weight * semantic_effective
-            - config.laziness_weight * conditional_penalties
-            + dirty_bonus
-        )
-
         print(f"\nEpsilon: {epsilon:.4f}")
-        summarize("", rewards, improved, non_improving_edits)
-        if is_clean_prompt is not None:
-            summarize(
-                "clean_subset_", rewards, improved, non_improving_edits, is_clean_prompt
+        for greco_weight, semantic_weight in weight_pairs:
+            laziness_weight = config.laziness_weight
+            weight_sum = greco_weight + semantic_weight + laziness_weight
+            if abs(weight_sum - 1.0) > 1e-3:
+                print(
+                    f"  Weights: greco={greco_weight:.2f} semantic={semantic_weight:.2f} "
+                    f"laziness={laziness_weight:.2f} (sum={weight_sum:.2f})"
+                )
+            else:
+                print(
+                    f"  Weights: greco={greco_weight:.2f} semantic={semantic_weight:.2f} "
+                    f"laziness={laziness_weight:.2f}"
+                )
+
+            rewards = (
+                greco_weight * effective_gain
+                + semantic_weight * semantic_effective
+                - laziness_weight * conditional_penalties
+                + dirty_bonus
+                - dirty_copy_penalty
             )
-            summarize(
-                "dirty_subset_",
-                rewards,
-                improved,
-                non_improving_edits,
-                ~is_clean_prompt,
-            )
+
+            summarize("  ", rewards, improved, non_improving_edits)
+            if is_clean_prompt is not None:
+                summarize(
+                    "  clean_subset_",
+                    rewards,
+                    improved,
+                    non_improving_edits,
+                    is_clean_prompt,
+                )
+                summarize(
+                    "  dirty_subset_",
+                    rewards,
+                    improved,
+                    non_improving_edits,
+                    ~is_clean_prompt,
+                )
 
         if args.use_clean_fields and is_clean_tensor is not None:
             if applied_edits_tensor is None:
@@ -554,6 +622,7 @@ def main() -> None:
                 - config.laziness_weight * conditional_penalties_clean
                 - no_edit_penalty
                 + dirty_bonus
+                - dirty_copy_penalty
             )
             summarize("clean_", rewards_clean, improved, non_improving_edits)
 
