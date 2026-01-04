@@ -122,6 +122,12 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Bonus for improved edits on dirty samples.",
     )
+    parser.add_argument(
+        "--dirty-gain-boost",
+        type=float,
+        default=0.0,
+        help="Scale GRECO gain for improved edits on dirty samples (e.g. 0.2 = +20%).",
+    )
     parser.add_argument("--use-clean-fields", action="store_true")
     parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
     parser.add_argument("--no-edit-penalty", type=float, default=0.05)
@@ -469,13 +475,26 @@ def main() -> None:
             non_improving_edits, edit_penalties, torch.zeros_like(edit_penalties)
         )
         dirty_bonus = torch.zeros_like(effective_gain)
-        if args.dirty_edit_bonus > 0:
+        dirty_has_edits = None
+        if args.dirty_edit_bonus > 0 or args.dirty_gain_boost > 0:
             if is_clean_tensor is None:
-                raise ValueError("dirty-edit-bonus requires dataset column 'is_clean'.")
+                raise ValueError(
+                    "dirty-edit-bonus/dirty-gain-boost requires dataset column 'is_clean'."
+                )
             if applied_edits_tensor is not None:
                 dirty_has_edits = (~is_clean_tensor) & (applied_edits_tensor > 0)
             else:
                 dirty_has_edits = ~is_clean_tensor
+
+        if args.dirty_gain_boost > 0:
+            dirty_improved_edits = dirty_has_edits & (edit_penalties > 0) & improved
+            effective_gain = torch.where(
+                dirty_improved_edits,
+                effective_gain * (1 + args.dirty_gain_boost),
+                effective_gain,
+            )
+
+        if args.dirty_edit_bonus > 0:
             dirty_edit_mask = dirty_has_edits & (edit_penalties > 0) & improved
             dirty_bonus = torch.where(
                 dirty_edit_mask,
