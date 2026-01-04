@@ -46,7 +46,7 @@ class GECConfig(BaseSettings):
     greco_weight: float = 0.6
     semantic_weight: float = 0.3
     laziness_weight: float = 0.1
-    gain_epsilon: float = 0.02
+    gain_epsilon: float = 0.01
 
     # Reward model paths
     greco_model_name: str = "mrqorib/grammaticality"

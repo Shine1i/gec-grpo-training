@@ -36,7 +36,7 @@ temperature: 1.0  # Sampling temperature for diverse generations
 greco_weight: 0.6
 semantic_weight: 0.3
 laziness_weight: 0.1
-gain_epsilon: 0.02
+gain_epsilon: 0.01
 
 # Reward models (HuggingFace)
 greco_model_name: mrqorib/grammaticality
