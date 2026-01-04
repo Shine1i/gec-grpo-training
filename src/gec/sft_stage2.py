@@ -1,6 +1,6 @@
 """
 Stage 2 SFT: Domain-Specific Fine-tuning with Unsloth
-Full fine-tuning on moogin/typix-hq-grammar (62k samples)
+Full fine-tuning on mixed grammar + rewriting dataset
 """
 
 import modal
@@ -52,15 +52,14 @@ def train_stage2(resume: bool = False):
     from unsloth import FastLanguageModel
     from unsloth.chat_templates import get_chat_template, train_on_responses_only
     # Then other imports
-    from datasets import load_dataset
+    from datasets import load_dataset, concatenate_datasets
     from transformers import EarlyStoppingCallback
     from trl import SFTTrainer, SFTConfig
     import wandb
 
     # Config
     HF_TOKEN = os.environ.get("HF_TOKEN")
-    MODEL_NAME = "moogin/typix-grammar-1.2b-stage1"
-    DATASET_NAME = "moogin/typix-hq-grammar"
+    MODEL_NAME = "unsloth/LFM2-1.2B"
     OUTPUT_NAME = "moogin/typix-grammar-1.2b-stage2"
     MAX_SEQ_LENGTH = 768
 
@@ -106,12 +105,221 @@ def train_stage2(resume: bool = False):
     # Apply chatml chat template (LFM2 uses chatml)
     tokenizer = get_chat_template(tokenizer, chat_template="chatml")
 
-    print(f"Loading dataset: {DATASET_NAME}")
-    dataset = load_dataset(DATASET_NAME, token=HF_TOKEN)
-    train_dataset = dataset["train"]
-    eval_dataset = dataset["validation"]
+    # ==================== DATASET LOADING ====================
+    print("Loading datasets...")
 
-    print(f"Train samples: {len(train_dataset)}, Eval samples: {len(eval_dataset)}")
+    # Load all datasets
+    dataset_grammar = load_dataset("moogin/typix-hq-grannar")
+    dataset_rewriting = load_dataset("HuggingFaceTB/smoltalk", "explore-instruct-rewriting")
+    dataset_rewrite = load_dataset("HuggingFaceTB/smoltalk", "smol-rewrite")
+
+    # Define the new system prompt
+    NEW_SYSTEM_PROMPT = "You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text."
+
+    # Define the system prompts for each tone
+    PROFESSIONAL_PROMPT = "You're an AI assistant for text re-writing. Rewrite the input text to make it more professional and formal while retaining its essential content."
+    CONCISE_PROMPT = "You're an AI assistant for text re-writing. Rewrite the input text to make it more concise while preserving its core meaning."
+    FRIENDLY_PROMPT = "You're an AI assistant for text re-writing. Rewrite the input text to make it more friendly and approachable while maintaining its main points."
+
+    def transform_rewriting_conversation(example):
+        """Transform explore-instruct-rewriting format"""
+        messages = example["messages"]
+        transformed_messages = []
+
+        for msg in messages:
+            if msg["role"] == "system":
+                transformed_messages.append({
+                    "role": "system",
+                    "content": NEW_SYSTEM_PROMPT
+                })
+            elif msg["role"] == "user":
+                content = msg["content"]
+                if "\n" in content:
+                    split_pos = content.index("\n") + 1
+                    prefix = content[:split_pos]
+                    text = content[split_pos:]
+                    new_content = f"{prefix}<Text>\n{text}\n</Text>"
+                else:
+                    new_content = f"<Text>\n{content}\n</Text>"
+
+                transformed_messages.append({
+                    "role": "user",
+                    "content": new_content
+                })
+            else:
+                transformed_messages.append(msg)
+
+        return {"messages": transformed_messages}
+
+    def transform_rewrite_conversation(example):
+        """Transform smol-rewrite format"""
+        messages = example["messages"]
+        transformed_messages = []
+
+        # Extract the instruction from system prompt
+        system_content = None
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content = msg["content"]
+                break
+
+        # Remove the prefix and use as instruction
+        instruction = system_content.replace("You're an AI assistant for text re-writing. ", "")
+
+        for msg in messages:
+            if msg["role"] == "system":
+                transformed_messages.append({
+                    "role": "system",
+                    "content": NEW_SYSTEM_PROMPT
+                })
+            elif msg["role"] == "user":
+                # Add instruction as prefix, wrap original content
+                new_content = f"{instruction}\n<Text>\n{msg['content']}\n</Text>"
+                transformed_messages.append({
+                    "role": "user",
+                    "content": new_content
+                })
+            else:
+                transformed_messages.append(msg)
+
+        return {"messages": transformed_messages}
+
+    def filter_by_system_prompt(example, target_prompt):
+        """Filter for specific system prompt"""
+        messages = example["messages"]
+        for msg in messages:
+            if msg["role"] == "system" and msg["content"] == target_prompt:
+                return True
+        return False
+
+    # Transform explore-instruct-rewriting
+    train_rewriting = dataset_rewriting["train"].map(transform_rewriting_conversation)
+    eval_rewriting = dataset_rewriting["test"].map(transform_rewriting_conversation)
+
+    # Filter and transform smol-rewrite by tone
+    train_professional = dataset_rewrite["train"].filter(
+        lambda x: filter_by_system_prompt(x, PROFESSIONAL_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    train_concise = dataset_rewrite["train"].filter(
+        lambda x: filter_by_system_prompt(x, CONCISE_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    train_friendly = dataset_rewrite["train"].filter(
+        lambda x: filter_by_system_prompt(x, FRIENDLY_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    eval_professional = dataset_rewrite["test"].filter(
+        lambda x: filter_by_system_prompt(x, PROFESSIONAL_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    eval_concise = dataset_rewrite["test"].filter(
+        lambda x: filter_by_system_prompt(x, CONCISE_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    eval_friendly = dataset_rewrite["test"].filter(
+        lambda x: filter_by_system_prompt(x, FRIENDLY_PROMPT)
+    ).map(transform_rewrite_conversation)
+
+    # Calculate required samples from actual dataset sizes
+    GRAMMAR_TRAIN = len(dataset_grammar["train"])
+    GRAMMAR_EVAL = len(dataset_grammar["validation"])
+
+    # Train calculations
+    TOTAL_TRAIN = int(GRAMMAR_TRAIN / 0.6)
+    REWRITE_TRAIN_TOTAL = TOTAL_TRAIN - GRAMMAR_TRAIN
+    SMOL_REWRITE_TRAIN = int(REWRITE_TRAIN_TOTAL * 0.70)
+    EXPLORE_TRAIN = REWRITE_TRAIN_TOTAL - SMOL_REWRITE_TRAIN
+
+    PROFESSIONAL_TRAIN = int(SMOL_REWRITE_TRAIN * 0.50)
+    CONCISE_TRAIN = int(SMOL_REWRITE_TRAIN * 0.35)
+    FRIENDLY_TRAIN = SMOL_REWRITE_TRAIN - PROFESSIONAL_TRAIN - CONCISE_TRAIN
+
+    # Eval calculations
+    TOTAL_EVAL = int(GRAMMAR_EVAL / 0.6)
+    REWRITE_EVAL_TOTAL = TOTAL_EVAL - GRAMMAR_EVAL
+    SMOL_REWRITE_EVAL = int(REWRITE_EVAL_TOTAL * 0.70)
+    EXPLORE_EVAL = REWRITE_EVAL_TOTAL - SMOL_REWRITE_EVAL
+
+    PROFESSIONAL_EVAL = int(SMOL_REWRITE_EVAL * 0.50)
+    CONCISE_EVAL = int(SMOL_REWRITE_EVAL * 0.35)
+    FRIENDLY_EVAL = SMOL_REWRITE_EVAL - PROFESSIONAL_EVAL - CONCISE_EVAL
+
+    print("=== Sample Requirements ===")
+    print(f"\nTRAIN:")
+    print(f"  Grammar: {GRAMMAR_TRAIN:,} (60%)")
+    print(f"  Rewrite/Tone: {REWRITE_TRAIN_TOTAL:,} (40%)")
+    print(f"    - smol-rewrite: {SMOL_REWRITE_TRAIN:,} (70% of rewrite)")
+    print(f"      • Professional/formal: {PROFESSIONAL_TRAIN:,} (50%)")
+    print(f"      • Concise: {CONCISE_TRAIN:,} (35%)")
+    print(f"      • Friendly: {FRIENDLY_TRAIN:,} (15%)")
+    print(f"    - explore-instruct-rewriting: {EXPLORE_TRAIN:,} (30% of rewrite)")
+    print(f"  TOTAL: {TOTAL_TRAIN:,}")
+
+    print(f"\nEVAL:")
+    print(f"  Grammar: {GRAMMAR_EVAL:,} (60%)")
+    print(f"  Rewrite/Tone: {REWRITE_EVAL_TOTAL:,} (40%)")
+    print(f"    - smol-rewrite: {SMOL_REWRITE_EVAL:,} (70% of rewrite)")
+    print(f"      • Professional/formal: {PROFESSIONAL_EVAL:,} (50%)")
+    print(f"      • Concise: {CONCISE_EVAL:,} (35%)")
+    print(f"      • Friendly: {FRIENDLY_EVAL:,} (15%)")
+    print(f"    - explore-instruct-rewriting: {EXPLORE_EVAL:,} (30% of rewrite)")
+    print(f"  TOTAL: {TOTAL_EVAL:,}")
+
+    print("\n=== Available Samples ===")
+    print(f"\nTRAIN:")
+    print(f"  Professional: {len(train_professional):,}")
+    print(f"  Concise: {len(train_concise):,}")
+    print(f"  Friendly: {len(train_friendly):,}")
+    print(f"  Explore-instruct-rewriting: {len(train_rewriting):,}")
+
+    print(f"\nEVAL:")
+    print(f"  Professional: {len(eval_professional):,}")
+    print(f"  Concise: {len(eval_concise):,}")
+    print(f"  Friendly: {len(eval_friendly):,}")
+    print(f"  Explore-instruct-rewriting: {len(eval_rewriting):,}")
+
+    # Sample the required amounts (shuffle first for randomness)
+    train_professional_sampled = train_professional.shuffle(seed=42).select(range(min(PROFESSIONAL_TRAIN, len(train_professional))))
+    train_concise_sampled = train_concise.shuffle(seed=42).select(range(min(CONCISE_TRAIN, len(train_concise))))
+    train_friendly_sampled = train_friendly.shuffle(seed=42).select(range(min(FRIENDLY_TRAIN, len(train_friendly))))
+    train_rewriting_sampled = train_rewriting.shuffle(seed=42).select(range(min(EXPLORE_TRAIN, len(train_rewriting))))
+
+    eval_professional_sampled = eval_professional.shuffle(seed=42).select(range(min(PROFESSIONAL_EVAL, len(eval_professional))))
+    eval_concise_sampled = eval_concise.shuffle(seed=42).select(range(min(CONCISE_EVAL, len(eval_concise))))
+    eval_friendly_sampled = eval_friendly.shuffle(seed=42).select(range(min(FRIENDLY_EVAL, len(eval_friendly))))
+    eval_rewriting_sampled = eval_rewriting.shuffle(seed=42).select(range(min(EXPLORE_EVAL, len(eval_rewriting))))
+
+    # Combine all datasets
+    train_dataset = concatenate_datasets([
+        dataset_grammar["train"],
+        train_professional_sampled,
+        train_concise_sampled,
+        train_friendly_sampled,
+        train_rewriting_sampled
+    ]).shuffle(seed=42)
+
+    eval_dataset = concatenate_datasets([
+        dataset_grammar["validation"],
+        eval_professional_sampled,
+        eval_concise_sampled,
+        eval_friendly_sampled,
+        eval_rewriting_sampled
+    ]).shuffle(seed=42)
+
+    print("\n=== Final Dataset ===")
+    print(f"Train samples: {len(train_dataset):,}")
+    print(f"Eval samples: {len(eval_dataset):,}")
+
+    # Show samples from each source
+    print("\n=== Sample Examples ===")
+    print("\n--- Grammar sample ---")
+    print(dataset_grammar["train"][0]["messages"])
+    print("\n--- Professional tone sample ---")
+    print(train_professional_sampled[0]["messages"])
+    print("\n--- Explore-instruct-rewriting sample ---")
+    print(train_rewriting_sampled[0]["messages"])
+    # ==================== END DATASET LOADING ====================
 
     # Format dataset - apply chat template
     def formatting_func(examples):
