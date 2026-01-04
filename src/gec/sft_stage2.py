@@ -145,14 +145,15 @@ def train_stage2(resume: bool = False):
                 content = msg["content"]
                 if "\n" in content:
                     split_pos = content.index("\n")
-                    prefix = content[:split_pos]
+                    prefix = content[:split_pos].rstrip(".")
                     text = content[split_pos + 1:]
                     # Add colon only if prefix doesn't end with one
                     colon = "" if prefix.endswith(":") else ":"
                     new_content = f"{prefix}{colon}\n<Text>\n{text}\n</Text>"
                 else:
-                    colon = "" if content.endswith(":") else ":"
-                    new_content = f"{content}{colon}\n<Text>\n</Text>"
+                    prefix = content.rstrip(".")
+                    colon = "" if prefix.endswith(":") else ":"
+                    new_content = f"{prefix}{colon}\n<Text>\n</Text>"
                 transformed_messages.append({
                     "role": "user",
                     "content": new_content
@@ -184,9 +185,10 @@ def train_stage2(resume: bool = False):
                     "content": NEW_SYSTEM_PROMPT
                 })
             elif msg["role"] == "user":
-                # Add colon only if instruction doesn't already end with one
-                colon = "" if instruction.endswith(":") else ":"
-                new_content = f"{instruction}{colon}\n<Text>\n{msg['content']}\n</Text>"
+                # Remove trailing period and add colon if needed
+                inst = instruction.rstrip(".")
+                colon = "" if inst.endswith(":") else ":"
+                new_content = f"{inst}{colon}\n<Text>\n{msg['content']}\n</Text>"
                 transformed_messages.append({
                     "role": "user",
                     "content": new_content
