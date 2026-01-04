@@ -6,7 +6,7 @@
 seed: 42
 
 # Language Model
-model_name: moogin/Typix-medium
+model_name: moogin/typix-mixed-epo
 max_seq_length: 512
 system_prompt: "You are a writing assistant that edits text. Follow the user's instruction exactly. Preserve the original meaning unless the user asks to change it. Output only the revised text."
 

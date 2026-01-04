@@ -77,7 +77,14 @@ def main() -> None:
             truncation=True,
         )
         encoded = {k: v.to(device) for k, v in encoded.items() if k != "token_type_ids"}
-        input_lens = encoded["attention_mask"].sum(dim=1)
+        # With left padding, use padded length (not attention sum) to find where generation starts
+        padded_input_len = encoded["input_ids"].shape[1]
+
+        # Build stop token ids (eos + <|im_end|>)
+        stop_token_ids = [tokenizer.eos_token_id]
+        im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if im_end_id != tokenizer.unk_token_id:
+            stop_token_ids.append(im_end_id)
 
         with torch.no_grad():
             generated = model.generate(
@@ -89,11 +96,11 @@ def main() -> None:
                 max_new_tokens=args.max_new_tokens or config.max_completion_length,
                 num_return_sequences=args.num_generations,
                 pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=stop_token_ids,
             )
 
-        input_lens = input_lens.repeat_interleave(args.num_generations)
-        for seq, in_len in zip(generated, input_lens, strict=True):
-            completion_ids = seq[int(in_len) :]
+        for seq in generated:
+            completion_ids = seq[padded_input_len:]
             completions.append(
                 tokenizer.decode(completion_ids, skip_special_tokens=True)
             )
