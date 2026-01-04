@@ -108,6 +108,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
+    parser.add_argument("--use-clean-fields", action="store_true")
+    parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
+    parser.add_argument("--no-edit-penalty", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -155,6 +158,14 @@ def main() -> None:
         dataset = stratified_sample(dataset, args.num_samples, seed=args.seed)
 
     sources = dataset["prompt"]
+    is_clean = dataset["is_clean"] if "is_clean" in dataset.column_names else None
+    applied_edits = (
+        dataset["applied_edits"] if "applied_edits" in dataset.column_names else None
+    )
+    if args.use_clean_fields and (is_clean is None or applied_edits is None):
+        raise ValueError(
+            "use_clean_fields requires dataset columns 'is_clean' and 'applied_edits'."
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if device.type == "cuda" else None
@@ -164,9 +175,14 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        config.model_name, torch_dtype=dtype
-    ).to(device)
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            config.model_name, dtype=dtype
+        ).to(device)
+    except TypeError:
+        model = AutoModelForCausalLM.from_pretrained(
+            config.model_name, torch_dtype=dtype
+        ).to(device)
     model.eval()
 
     prompts = [
@@ -180,14 +196,28 @@ def main() -> None:
 
     completions = []
     repeated_sources = []
+    repeated_is_clean = []
+    repeated_applied_edits = []
 
     max_new_tokens = args.max_new_tokens or config.max_completion_length
 
+    source_offset = 0
     for prompt_batch, source_batch in zip(
         batched(prompts, args.gen_batch_size),
         batched(sources, args.gen_batch_size),
         strict=True,
     ):
+        if is_clean is not None:
+            batch_is_clean = is_clean[source_offset : source_offset + len(source_batch)]
+        else:
+            batch_is_clean = None
+        if applied_edits is not None:
+            batch_applied_edits = applied_edits[
+                source_offset : source_offset + len(source_batch)
+            ]
+        else:
+            batch_applied_edits = None
+
         encoded = tokenizer(
             prompt_batch,
             return_tensors="pt",
@@ -219,6 +249,13 @@ def main() -> None:
         repeated_sources.extend(
             [src for src in source_batch for _ in range(num_generations)]
         )
+        if is_clean is not None:
+            for flag in batch_is_clean:
+                repeated_is_clean.extend([bool(flag)] * num_generations)
+        if applied_edits is not None:
+            for value in batch_applied_edits:
+                repeated_applied_edits.extend([int(value)] * num_generations)
+        source_offset += len(source_batch)
 
     reward_model = GECRewardModel(
         greco_model_name=config.greco_model_name,
@@ -248,9 +285,55 @@ def main() -> None:
         reward_model, repeated_sources, completions, args.reward_batch_size
     )
     edit_penalties = reward_model.compute_edit_penalty(repeated_sources, completions)
+    if is_clean is not None:
+        is_clean_tensor = torch.tensor(repeated_is_clean, dtype=torch.bool)
+    else:
+        is_clean_tensor = None
+    if applied_edits is not None:
+        applied_edits_tensor = torch.tensor(repeated_applied_edits)
+    else:
+        applied_edits_tensor = None
 
     epsilons = [float(x.strip()) for x in args.epsilons.split(",") if x.strip()]
     num_prompts = len(sources)
+
+    def summarize(
+        label: str,
+        rewards: torch.Tensor,
+        improved: torch.Tensor,
+        non_improving_edits: torch.Tensor,
+    ) -> None:
+        reward_mean = rewards.mean().item()
+        reward_std = rewards.std().item()
+        frac_improved = improved.float().mean().item()
+        frac_edits = edit_penalties.float().mean().item()
+        frac_non_improving_edits = non_improving_edits.float().mean().item()
+        frac_edited_positive = (
+            ((rewards > 0) & (edit_penalties > 0)).float().mean().item()
+        )
+
+        grouped_rewards = rewards.view(num_prompts, num_generations)
+        grouped_edits = edit_penalties.view(num_prompts, num_generations)
+        has_copy = (grouped_edits == 0).any(dim=1)
+        copy_rewards = grouped_rewards.clone()
+        copy_rewards[grouped_edits > 0] = -float("inf")
+        best_copy = copy_rewards.max(dim=1).values
+        best_any = grouped_rewards.max(dim=1).values
+        copy_best = (has_copy & (best_copy >= best_any - 1e-6)).float().mean().item()
+
+        q10, q50, q90 = torch.quantile(
+            rewards, torch.tensor([0.1, 0.5, 0.9])
+        ).tolist()
+
+        print(f"  {label}reward_mean: {reward_mean:.4f} | reward_std: {reward_std:.4f}")
+        print(f"  {label}improved_frac: {frac_improved:.4f}")
+        print(f"  {label}edit_frac: {frac_edits:.4f}")
+        print(f"  {label}non_improving_edit_frac: {frac_non_improving_edits:.4f}")
+        print(f"  {label}edited_positive_frac: {frac_edited_positive:.4f}")
+        print(f"  {label}copy_best_frac: {copy_best:.4f}")
+        print(
+            f"  {label}reward_quantiles: p10={q10:.4f} p50={q50:.4f} p90={q90:.4f}"
+        )
 
     for epsilon in epsilons:
         improved = greco_gain > epsilon
@@ -271,32 +354,41 @@ def main() -> None:
             - config.laziness_weight * conditional_penalties
         )
 
-        reward_mean = rewards.mean().item()
-        reward_std = rewards.std().item()
-        frac_improved = improved.float().mean().item()
-        frac_edits = edit_penalties.float().mean().item()
-        frac_non_improving_edits = non_improving_edits.float().mean().item()
-        frac_edited_positive = ((rewards > 0) & (edit_penalties > 0)).float().mean().item()
-
-        grouped_rewards = rewards.view(num_prompts, num_generations)
-        grouped_edits = edit_penalties.view(num_prompts, num_generations)
-        has_copy = (grouped_edits == 0).any(dim=1)
-        copy_rewards = grouped_rewards.clone()
-        copy_rewards[grouped_edits > 0] = -float("inf")
-        best_copy = copy_rewards.max(dim=1).values
-        best_any = grouped_rewards.max(dim=1).values
-        copy_best = (has_copy & (best_copy >= best_any - 1e-6)).float().mean().item()
-
-        q10, q50, q90 = torch.quantile(rewards, torch.tensor([0.1, 0.5, 0.9])).tolist()
-
         print(f"\nEpsilon: {epsilon:.4f}")
-        print(f"  reward_mean: {reward_mean:.4f} | reward_std: {reward_std:.4f}")
-        print(f"  improved_frac: {frac_improved:.4f}")
-        print(f"  edit_frac: {frac_edits:.4f}")
-        print(f"  non_improving_edit_frac: {frac_non_improving_edits:.4f}")
-        print(f"  edited_positive_frac: {frac_edited_positive:.4f}")
-        print(f"  copy_best_frac: {copy_best:.4f}")
-        print(f"  reward_quantiles: p10={q10:.4f} p50={q50:.4f} p90={q90:.4f}")
+        summarize("", rewards, improved, non_improving_edits)
+
+        if args.use_clean_fields and is_clean_tensor is not None:
+            if applied_edits_tensor is None:
+                raise ValueError(
+                    "use_clean_fields requires dataset column 'applied_edits'."
+                )
+            penalty_scale = torch.where(
+                is_clean_tensor,
+                torch.ones_like(conditional_penalties),
+                torch.full_like(conditional_penalties, args.dirty_penalty_scale),
+            )
+            conditional_penalties_clean = conditional_penalties * penalty_scale
+
+            semantic_clean = torch.where(
+                non_improving_edits & is_clean_tensor,
+                torch.zeros_like(semantic_scores),
+                semantic_scores,
+            )
+            no_edit = edit_penalties == 0
+            dirty_has_edits = (~is_clean_tensor) & (applied_edits_tensor > 0)
+            no_edit_penalty = torch.where(
+                no_edit & dirty_has_edits,
+                torch.full_like(conditional_penalties, args.no_edit_penalty),
+                torch.zeros_like(conditional_penalties),
+            )
+
+            rewards_clean = (
+                config.greco_weight * effective_gain
+                + config.semantic_weight * semantic_clean
+                - config.laziness_weight * conditional_penalties_clean
+                - no_edit_penalty
+            )
+            summarize("clean_", rewards_clean, improved, non_improving_edits)
 
 
 if __name__ == "__main__":
