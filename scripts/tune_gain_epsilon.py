@@ -116,6 +116,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--print-clean-samples", type=int, default=0)
     parser.add_argument("--print-dirty-samples", type=int, default=0)
+    parser.add_argument(
+        "--dirty-edit-bonus",
+        type=float,
+        default=0.0,
+        help="Bonus for improved edits on dirty samples.",
+    )
     parser.add_argument("--use-clean-fields", action="store_true")
     parser.add_argument("--dirty-penalty-scale", type=float, default=0.2)
     parser.add_argument("--no-edit-penalty", type=float, default=0.05)
@@ -239,7 +245,7 @@ def main() -> None:
             truncation=True,
         )
         encoded = {k: v.to(device) for k, v in encoded.items() if k != "token_type_ids"}
-        input_lens = encoded["attention_mask"].sum(dim=1)
+        prompt_len = encoded["input_ids"].shape[1]
 
         batch_size = len(source_batch)
         batch_completions = [[] for _ in range(batch_size)]
@@ -253,10 +259,8 @@ def main() -> None:
                     num_return_sequences=1,
                     pad_token_id=tokenizer.eos_token_id,
                 )
-                for idx, (seq, in_len) in enumerate(
-                    zip(greedy_out, input_lens, strict=True)
-                ):
-                    completion_ids = seq[int(in_len) :]
+                for idx, seq in enumerate(greedy_out):
+                    completion_ids = seq[prompt_len:]
                     batch_completions[idx].append(
                         tokenizer.decode(completion_ids, skip_special_tokens=True)
                     )
@@ -272,11 +276,8 @@ def main() -> None:
                     num_return_sequences=sampled_per_prompt,
                     pad_token_id=tokenizer.eos_token_id,
                 )
-                sample_input_lens = input_lens.repeat_interleave(sampled_per_prompt)
-                for j, (seq, in_len) in enumerate(
-                    zip(sampled_out, sample_input_lens, strict=True)
-                ):
-                    completion_ids = seq[int(in_len) :]
+                for j, seq in enumerate(sampled_out):
+                    completion_ids = seq[prompt_len:]
                     prompt_idx = j // sampled_per_prompt
                     batch_completions[prompt_idx].append(
                         tokenizer.decode(completion_ids, skip_special_tokens=True)
@@ -467,11 +468,26 @@ def main() -> None:
         conditional_penalties = torch.where(
             non_improving_edits, edit_penalties, torch.zeros_like(edit_penalties)
         )
+        dirty_bonus = torch.zeros_like(effective_gain)
+        if args.dirty_edit_bonus > 0:
+            if is_clean_tensor is None:
+                raise ValueError("dirty-edit-bonus requires dataset column 'is_clean'.")
+            if applied_edits_tensor is not None:
+                dirty_has_edits = (~is_clean_tensor) & (applied_edits_tensor > 0)
+            else:
+                dirty_has_edits = ~is_clean_tensor
+            dirty_edit_mask = dirty_has_edits & (edit_penalties > 0) & improved
+            dirty_bonus = torch.where(
+                dirty_edit_mask,
+                torch.full_like(effective_gain, args.dirty_edit_bonus),
+                torch.zeros_like(effective_gain),
+            )
 
         rewards = (
             config.greco_weight * effective_gain
             + config.semantic_weight * semantic_effective
             - config.laziness_weight * conditional_penalties
+            + dirty_bonus
         )
 
         print(f"\nEpsilon: {epsilon:.4f}")
@@ -518,6 +534,7 @@ def main() -> None:
                 + config.semantic_weight * semantic_clean
                 - config.laziness_weight * conditional_penalties_clean
                 - no_edit_penalty
+                + dirty_bonus
             )
             summarize("clean_", rewards_clean, improved, non_improving_edits)
 
