@@ -102,10 +102,12 @@ def load_gec_dataset(dataset_name: str, size: Optional[int] = None) -> Dataset:
     prompts = []
     references = []
     is_clean_flags = []
+    sources = []
 
     for item in ds:
         messages = item.get("messages", [])
         is_clean = item.get("is_clean", False)
+        source = item.get("source", "unknown")
 
         user_msg = next((m for m in messages if m["role"] == "user"), None)
         assistant_msg = next((m for m in messages if m["role"] == "assistant"), None)
@@ -114,13 +116,14 @@ def load_gec_dataset(dataset_name: str, size: Optional[int] = None) -> Dataset:
             incorrect_text = extract_text_from_tags(user_msg["content"])
             prompts.append(incorrect_text)
             is_clean_flags.append(is_clean)
+            sources.append(source)
 
             if assistant_msg:
                 references.append(assistant_msg["content"])
             else:
                 references.append(None)
 
-    return Dataset.from_dict({"prompt": prompts, "reference": references, "is_clean": is_clean_flags})
+    return Dataset.from_dict({"prompt": prompts, "reference": references, "is_clean": is_clean_flags, "source": sources})
 
 
 def make_gec_messages(incorrect_text: str, system_prompt: str) -> list[dict[str, str]]:

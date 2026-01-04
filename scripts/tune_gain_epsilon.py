@@ -2,11 +2,96 @@ import argparse
 import random
 
 import torch
+from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.gec.config import GECConfig
 from src.gec.dataset import load_gec_dataset, make_gec_messages
 from src.gec.rewards import GECRewardModel
+
+
+def stratified_sample(
+    ds: Dataset,
+    size: int,
+    clean_ratio: float = 0.14,
+    seed: int = 42,
+) -> Dataset:
+    """
+    Stratified sample with:
+    - 14% clean samples
+    - 50% wi_locness/fce combined, 50% lang8_replay by source
+    """
+    random.seed(seed)
+
+    # Split by source and is_clean
+    buckets = {
+        ("wi_locness", True): [],
+        ("wi_locness", False): [],
+        ("fce", True): [],
+        ("fce", False): [],
+        ("lang8_replay", True): [],
+        ("lang8_replay", False): [],
+    }
+
+    for i, x in enumerate(ds):
+        source = x.get("source", "unknown")
+        is_clean = x.get("is_clean", False)
+        key = (source, is_clean)
+        if key in buckets:
+            buckets[key].append(i)
+
+    # Shuffle all buckets
+    for v in buckets.values():
+        random.shuffle(v)
+
+    # Calculate targets: 50% wi_locness+fce, 50% lang8_replay
+    wi_fce_total = size // 2
+    lang8_total = size - wi_fce_total
+
+    # Within wi_fce: split evenly between wi_locness and fce
+    wi_total = wi_fce_total // 2
+    fce_total = wi_fce_total - wi_total
+
+    # Clean ratio applied per source group
+    total_clean = int(size * clean_ratio)
+    wi_clean_target = int(total_clean * (wi_total / size))
+    fce_clean_target = int(total_clean * (fce_total / size))
+    lang8_clean_target = total_clean - wi_clean_target - fce_clean_target
+
+    wi_error_target = wi_total - wi_clean_target
+    fce_error_target = fce_total - fce_clean_target
+    lang8_error_target = lang8_total - lang8_clean_target
+
+    # Sample from each bucket
+    selected = []
+    selected += buckets[("wi_locness", True)][:wi_clean_target]
+    selected += buckets[("wi_locness", False)][:wi_error_target]
+    selected += buckets[("fce", True)][:fce_clean_target]
+    selected += buckets[("fce", False)][:fce_error_target]
+    selected += buckets[("lang8_replay", True)][:lang8_clean_target]
+    selected += buckets[("lang8_replay", False)][:lang8_error_target]
+
+    # Fill if we didn't get enough
+    all_indices = set(range(len(ds)))
+    remaining = list(all_indices - set(selected))
+    random.shuffle(remaining)
+    while len(selected) < size and remaining:
+        selected.append(remaining.pop())
+
+    random.shuffle(selected)
+
+    # Log distribution
+    final_clean = sum(1 for i in selected if ds[i].get("is_clean"))
+    final_wi = sum(1 for i in selected if ds[i].get("source") == "wi_locness")
+    final_fce = sum(1 for i in selected if ds[i].get("source") == "fce")
+    final_lang8 = sum(1 for i in selected if ds[i].get("source") == "lang8_replay")
+    print(f"Stratified sample: {len(selected)} total")
+    print(f"  WI-LOCNESS: {final_wi} ({100*final_wi/len(selected):.1f}%)")
+    print(f"  FCE: {final_fce} ({100*final_fce/len(selected):.1f}%)")
+    print(f"  LANG8: {final_lang8} ({100*final_lang8/len(selected):.1f}%)")
+    print(f"  Clean: {final_clean} ({100*final_clean/len(selected):.1f}%)")
+
+    return ds.select(selected)
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +152,7 @@ def main() -> None:
 
     dataset = load_gec_dataset(config.dataset_name, None)
     if args.num_samples and len(dataset) > args.num_samples:
-        dataset = dataset.shuffle(seed=args.seed).select(range(args.num_samples))
+        dataset = stratified_sample(dataset, args.num_samples, seed=args.seed)
 
     sources = dataset["prompt"]
 
@@ -109,7 +194,7 @@ def main() -> None:
             padding=True,
             truncation=True,
         )
-        encoded = {k: v.to(device) for k, v in encoded.items()}
+        encoded = {k: v.to(device) for k, v in encoded.items() if k != "token_type_ids"}
         input_lens = encoded["attention_mask"].sum(dim=1)
 
         with torch.no_grad():
