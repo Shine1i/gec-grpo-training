@@ -126,8 +126,17 @@ def train_stage2(resume: bool = False):
         messages = example["messages"]
         transformed_messages = []
 
+        # Always add our system message first
+        has_system = any(msg["role"] == "system" for msg in messages)
+        if not has_system:
+            transformed_messages.append({
+                "role": "system",
+                "content": NEW_SYSTEM_PROMPT
+            })
+
         for msg in messages:
             if msg["role"] == "system":
+                # Replace with our system message
                 transformed_messages.append({
                     "role": "system",
                     "content": NEW_SYSTEM_PROMPT
@@ -135,13 +144,15 @@ def train_stage2(resume: bool = False):
             elif msg["role"] == "user":
                 content = msg["content"]
                 if "\n" in content:
-                    split_pos = content.index("\n") + 1
+                    split_pos = content.index("\n")
                     prefix = content[:split_pos]
-                    text = content[split_pos:]
-                    new_content = f"{prefix}<Text>\n{text}\n</Text>"
+                    text = content[split_pos + 1:]
+                    # Add colon only if prefix doesn't end with one
+                    colon = "" if prefix.endswith(":") else ":"
+                    new_content = f"{prefix}{colon}\n<Text>\n{text}\n</Text>"
                 else:
-                    new_content = f"<Text>\n{content}\n</Text>"
-
+                    colon = "" if content.endswith(":") else ":"
+                    new_content = f"{content}{colon}\n<Text>\n</Text>"
                 transformed_messages.append({
                     "role": "user",
                     "content": new_content
@@ -173,8 +184,9 @@ def train_stage2(resume: bool = False):
                     "content": NEW_SYSTEM_PROMPT
                 })
             elif msg["role"] == "user":
-                # Add instruction as prefix, wrap original content
-                new_content = f"{instruction}\n<Text>\n{msg['content']}\n</Text>"
+                # Add colon only if instruction doesn't already end with one
+                colon = "" if instruction.endswith(":") else ":"
+                new_content = f"{instruction}{colon}\n<Text>\n{msg['content']}\n</Text>"
                 transformed_messages.append({
                     "role": "user",
                     "content": new_content
