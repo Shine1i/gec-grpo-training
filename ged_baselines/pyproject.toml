@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ged_baselines"
+version = "0.0.1"
+dependencies = [
+  "transformers>=4.39.0",
+  "torch>=2.3.0",
+  "scikit-learn>=1.3.2"
+]
+requires-python = ">=3.9"
+authors = [
+    {name = "Takumi Goto"}
+]
+description = "A library for Grammatical Error Detection"
+readme = "README.md"
+license = {file = "LICENSE"}
