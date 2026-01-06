@@ -36,13 +36,13 @@ temperature: 1.0  # Sampling temperature for diverse generations
 greco_weight: 0.6
 semantic_weight: 0.0
 laziness_weight: 0.1
-gain_epsilon: 0.005
+gain_epsilon: 0.01
 reward_type: "ged"
-gain_mode: "soft"
+gain_mode: "hard"
 semantic_mode: "always"
-semantic_drift_weight: 0.2
+semantic_drift_weight: 0.3
 semantic_drift_threshold: 0.05
-clean_edit_penalty: 0.05
+clean_edit_penalty: 0.1
 ged_weight: 0.6
 
 # Reward models (HuggingFace)
