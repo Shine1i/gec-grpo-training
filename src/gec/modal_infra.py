@@ -21,6 +21,7 @@ def get_docker_image() -> modal.Image:
         )
         .env({"HF_HOME": "/hf_model_cache"})
         .add_local_dir("greco", "/root/greco")
+        .add_local_dir("ged_baselines", "/root/ged_baselines")
     )
     return docker_image
 
