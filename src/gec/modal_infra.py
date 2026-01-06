@@ -35,4 +35,5 @@ def get_retries(max_retries: int) -> modal.Retries:
 
 def get_secrets() -> list[modal.Secret]:
     wandb_secret = modal.Secret.from_name("wandb-secret")
-    return [wandb_secret]
+    hf_secret = modal.Secret.from_name("hf-secret")
+    return [wandb_secret, hf_secret]
