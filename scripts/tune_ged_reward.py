@@ -141,6 +141,17 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--print-clean-samples", type=int, default=0)
     parser.add_argument("--print-dirty-samples", type=int, default=0)
+    parser.add_argument(
+        "--print-token-labels",
+        action="store_true",
+        help="Print token-level GED labels for sampled prompts.",
+    )
+    parser.add_argument(
+        "--token-label-limit",
+        type=int,
+        default=200,
+        help="Max tokens to display per label line (after truncation).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -207,6 +218,30 @@ def compute_edit_penalty(sources: list[str], hypotheses: list[str]) -> torch.Ten
     for src, hyp in zip(sources, hypotheses):
         penalties.append(1.0 if src.strip() != hyp.strip() else 0.0)
     return torch.tensor(penalties)
+
+
+def split_for_ged(text: str) -> list[str]:
+    # Match ged_baselines token splitting behavior.
+    return text.split(" ")
+
+
+def format_token_labels(
+    text: str, labels: list[str], max_tokens: int
+) -> tuple[str, bool]:
+    tokens = split_for_ged(text)
+    truncated = False
+    if len(tokens) > len(labels):
+        tokens = tokens[: len(labels)]
+        truncated = True
+    pairs = []
+    for token, label in zip(tokens, labels, strict=False):
+        if token == "":
+            token = "<EMPTY>"
+        pairs.append(f"{token}/{label}")
+        if max_tokens and len(pairs) >= max_tokens:
+            truncated = True
+            break
+    return " ".join(pairs), truncated
 
 
 def main() -> None:
@@ -358,6 +393,9 @@ def main() -> None:
         max_len=args.ged_max_length,
         batch_size=args.ged_batch_size,
     )
+    source_labels_map = {
+        src: labels for src, labels in zip(unique_sources, source_labels, strict=True)
+    }
     source_err_map = {
         src: error_rate(labels, args.ged_use_rate)
         for src, labels in zip(unique_sources, source_labels, strict=True)
@@ -417,6 +455,13 @@ def main() -> None:
             meta_str = ", ".join(meta)
             print(f"\n[{label} idx {idx}] {meta_str}")
             print(f"Input: {sources[idx]}")
+            if args.print_token_labels:
+                src_labels = source_labels_map.get(sources[idx], [])
+                formatted, truncated = format_token_labels(
+                    sources[idx], src_labels, args.token_label_limit
+                )
+                suffix = " [truncated]" if truncated else ""
+                print(f"    src_labels: {formatted}{suffix}")
             base = idx * num_generations
             for j in range(num_generations):
                 pos = base + j
@@ -428,6 +473,13 @@ def main() -> None:
                     f"src_err={source_err[pos].item():.4f} hyp_err={hyp_err[pos].item():.4f}"
                 )
                 print(f"    {completion}")
+                if args.print_token_labels:
+                    hyp_labels = hyp_labels[pos]
+                    formatted, truncated = format_token_labels(
+                        completion, hyp_labels, args.token_label_limit
+                    )
+                    suffix = " [truncated]" if truncated else ""
+                    print(f"      hyp_labels: {formatted}{suffix}")
 
     if args.print_clean_samples or args.print_dirty_samples:
         if is_clean is None:
