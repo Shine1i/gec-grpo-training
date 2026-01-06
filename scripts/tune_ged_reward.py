@@ -114,6 +114,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
     parser.add_argument("--greedy-per-prompt", type=int, default=1)
+    parser.add_argument(
+        "--gain-mode",
+        type=str,
+        choices=["hard", "soft"],
+        default="hard",
+        help="hard: gate by epsilon; soft: relu(gain - epsilon).",
+    )
 
     parser.add_argument("--ged-model", type=str, default="gotutiyan/token-ged-electra-large-25cls")
     parser.add_argument("--ged-max-length", type=int, default=128)
@@ -138,6 +145,24 @@ def parse_args() -> argparse.Namespace:
         choices=["gated", "always"],
         default="gated",
     )
+    parser.add_argument(
+        "--semantic-drift-weight",
+        type=float,
+        default=0.0,
+        help="Penalty weight for semantic drift (1 - similarity) above threshold.",
+    )
+    parser.add_argument(
+        "--semantic-drift-threshold",
+        type=float,
+        default=0.05,
+        help="Drift margin before penalty activates.",
+    )
+    parser.add_argument(
+        "--clean-edit-penalty",
+        type=float,
+        default=0.0,
+        help="Penalty for any edit on clean examples (requires is_clean).",
+    )
 
     parser.add_argument("--print-clean-samples", type=int, default=0)
     parser.add_argument("--print-dirty-samples", type=int, default=0)
@@ -151,6 +176,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=200,
         help="Max tokens to display per label line (after truncation).",
+    )
+    parser.add_argument(
+        "--compact-output",
+        action="store_true",
+        help="Print a compact summary per configuration.",
     )
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -414,7 +444,10 @@ def main() -> None:
 
     ged_gain = source_err - hyp_err
 
-    if any(weight > 0 for weight in semantic_weights):
+    compute_semantic = any(weight > 0 for weight in semantic_weights) or (
+        args.semantic_drift_weight > 0
+    )
+    if compute_semantic:
         mpnet = SentenceTransformer(args.semantic_model, device=str(device))
         with torch.no_grad():
             src_embs = mpnet.encode(repeated_sources, convert_to_tensor=True)
@@ -424,12 +457,18 @@ def main() -> None:
             ).cpu()
     else:
         semantic_scores = torch.zeros_like(ged_gain)
+    semantic_drift = 1.0 - semantic_scores
+    semantic_drift_penalty = torch.clamp(
+        semantic_drift - args.semantic_drift_threshold, min=0.0
+    )
 
     edit_penalties = compute_edit_penalty(repeated_sources, completions)
     if is_clean is not None:
         is_clean_prompt = torch.tensor(is_clean, dtype=torch.bool)
+        is_clean_completion = torch.tensor(repeated_is_clean, dtype=torch.bool)
     else:
         is_clean_prompt = None
+        is_clean_completion = None
 
     epsilons = [float(x.strip()) for x in args.epsilons.split(",") if x.strip()]
     num_prompts = len(sources)
@@ -537,23 +576,34 @@ def main() -> None:
         else:
             copy_best = 0.0
 
-        q10, q50, q90 = torch.quantile(
-            rewards, torch.tensor([0.1, 0.5, 0.9], device=rewards.device)
-        ).tolist()
-
-        print(f"  {label}reward_mean: {reward_mean:.4f} | reward_std: {reward_std:.4f}")
-        print(f"  {label}improved_frac: {frac_improved:.4f}")
-        print(f"  {label}edit_frac: {frac_edits:.4f}")
-        print(f"  {label}non_improving_edit_frac: {frac_non_improving_edits:.4f}")
-        print(f"  {label}edited_positive_frac: {frac_edited_positive:.4f}")
-        print(f"  {label}copy_best_frac: {copy_best:.4f}")
-        print(
-            f"  {label}reward_quantiles: p10={q10:.4f} p50={q50:.4f} p90={q90:.4f}"
-        )
+        if args.compact_output:
+            print(
+                f"  {label}reward_mean={reward_mean:.4f} reward_std={reward_std:.4f} "
+                f"improved={frac_improved:.3f} edit={frac_edits:.3f} "
+                f"non_impr_edit={frac_non_improving_edits:.3f} copy_best={copy_best:.3f}"
+            )
+        else:
+            q10, q50, q90 = torch.quantile(
+                rewards, torch.tensor([0.1, 0.5, 0.9], device=rewards.device)
+            ).tolist()
+            print(f"  {label}reward_mean: {reward_mean:.4f} | reward_std: {reward_std:.4f}")
+            print(f"  {label}improved_frac: {frac_improved:.4f}")
+            print(f"  {label}edit_frac: {frac_edits:.4f}")
+            print(f"  {label}non_improving_edit_frac: {frac_non_improving_edits:.4f}")
+            print(f"  {label}edited_positive_frac: {frac_edited_positive:.4f}")
+            print(f"  {label}copy_best_frac: {copy_best:.4f}")
+            print(
+                f"  {label}reward_quantiles: p10={q10:.4f} p50={q50:.4f} p90={q90:.4f}"
+            )
 
     for epsilon in epsilons:
         improved = ged_gain > epsilon
-        effective_gain = torch.where(improved, ged_gain, torch.zeros_like(ged_gain))
+        if args.gain_mode == "soft":
+            effective_gain = torch.clamp(ged_gain - epsilon, min=0.0)
+        else:
+            effective_gain = torch.where(
+                improved, ged_gain, torch.zeros_like(ged_gain)
+            )
         non_improving_edits = (edit_penalties > 0) & (~improved)
         if args.semantic_mode == "gated":
             semantic_effective = torch.where(
@@ -567,26 +617,37 @@ def main() -> None:
             non_improving_edits, edit_penalties, torch.zeros_like(edit_penalties)
         )
 
-        print(f"\nEpsilon: {epsilon:.4f}")
+        print(f"\nEpsilon: {epsilon:.4f} (gain_mode={args.gain_mode})")
         for ged_weight, semantic_weight in weight_pairs:
             laziness_weight = config.laziness_weight
             weight_sum = ged_weight + semantic_weight + laziness_weight
+            weight_line = (
+                f"  Weights: ged={ged_weight:.2f} semantic={semantic_weight:.2f} "
+                f"laziness={laziness_weight:.2f}"
+            )
+            extras = []
             if abs(weight_sum - 1.0) > 1e-3:
-                print(
-                    f"  Weights: ged={ged_weight:.2f} semantic={semantic_weight:.2f} "
-                    f"laziness={laziness_weight:.2f} (sum={weight_sum:.2f})"
+                extras.append(f"sum={weight_sum:.2f}")
+            if args.semantic_drift_weight > 0:
+                extras.append(
+                    f"drift={args.semantic_drift_weight:.2f}@{args.semantic_drift_threshold:.2f}"
                 )
-            else:
-                print(
-                    f"  Weights: ged={ged_weight:.2f} semantic={semantic_weight:.2f} "
-                    f"laziness={laziness_weight:.2f}"
-                )
+            if args.clean_edit_penalty > 0:
+                extras.append(f"clean_edit={args.clean_edit_penalty:.2f}")
+            if extras:
+                weight_line = f"{weight_line} ({', '.join(extras)})"
+            print(weight_line)
 
             rewards = (
                 ged_weight * effective_gain
                 + semantic_weight * semantic_effective
                 - laziness_weight * conditional_penalties
             )
+            if args.semantic_drift_weight > 0:
+                rewards = rewards - args.semantic_drift_weight * semantic_drift_penalty
+            if args.clean_edit_penalty > 0 and is_clean_completion is not None:
+                clean_edits = (is_clean_completion & (edit_penalties > 0)).float()
+                rewards = rewards - args.clean_edit_penalty * clean_edits
 
             summarize("  ", rewards, improved, non_improving_edits)
             if is_clean_prompt is not None:
