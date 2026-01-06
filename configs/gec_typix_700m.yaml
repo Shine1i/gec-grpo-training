@@ -34,13 +34,24 @@ temperature: 1.0  # Sampling temperature for diverse generations
 
 # Reward weights
 greco_weight: 0.6
-semantic_weight: 0.3
+semantic_weight: 0.0
 laziness_weight: 0.1
-gain_epsilon: 0.01
+gain_epsilon: 0.005
+reward_type: "ged"
+gain_mode: "soft"
+semantic_mode: "always"
+semantic_drift_weight: 0.2
+semantic_drift_threshold: 0.05
+clean_edit_penalty: 0.05
+ged_weight: 0.6
 
 # Reward models (HuggingFace)
 greco_model_name: mrqorib/grammaticality
 mpnet_model: sentence-transformers/all-mpnet-base-v2
+ged_model_name: gotutiyan/token-ged-electra-large-bin
+ged_use_rate: true
+ged_max_length: 128
+ged_batch_size: 32
 
 # LoRA configuration
 use_peft: true

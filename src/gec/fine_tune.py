@@ -16,7 +16,7 @@ from .modal_infra import (
 )
 from .config import GECConfig
 from .dataset import load_gec_dataset, make_gec_messages
-from .rewards import GECRewardModel, build_gec_reward_func
+from .rewards import build_gec_reward_func, build_reward_model
 from .paths import get_path_model_checkpoints, get_path_model_checkpoints_local
 
 # Modal setup
@@ -84,14 +84,7 @@ def run_fine_tune(config: GECConfig, local: bool = False) -> None:
 
     # Initialize reward model
     print("Loading reward models...")
-    reward_model = GECRewardModel(
-        greco_model_name=config.greco_model_name,
-        mpnet_model=config.mpnet_model,
-        greco_weight=config.greco_weight,
-        semantic_weight=config.semantic_weight,
-        laziness_weight=config.laziness_weight,
-        gain_epsilon=config.gain_epsilon,
-    )
+    reward_model = build_reward_model(config)
     reward_func = build_gec_reward_func(reward_model)
 
     # Load dataset

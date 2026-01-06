@@ -47,10 +47,21 @@ class GECConfig(BaseSettings):
     semantic_weight: float = 0.3
     laziness_weight: float = 0.1
     gain_epsilon: float = 0.01
+    reward_type: str = "greco"  # greco | ged
+    gain_mode: str = "hard"  # hard | soft
+    semantic_mode: str = "gated"  # gated | always
+    semantic_drift_weight: float = 0.0
+    semantic_drift_threshold: float = 0.05
+    clean_edit_penalty: float = 0.0
+    ged_weight: float = 0.6
 
     # Reward model paths
     greco_model_name: str = "mrqorib/grammaticality"
     mpnet_model: str = "sentence-transformers/all-mpnet-base-v2"
+    ged_model_name: str = "gotutiyan/token-ged-electra-large-bin"
+    ged_use_rate: bool = True
+    ged_max_length: int = 128
+    ged_batch_size: int = 32
 
     # Experiment tracking
     wandb_enabled: bool

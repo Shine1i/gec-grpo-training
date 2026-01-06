@@ -298,7 +298,8 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if device.type == "cuda" else None
 
-    ged_weights = parse_float_list(args.ged_weights) or [config.greco_weight]
+    default_ged_weight = getattr(config, "ged_weight", config.greco_weight)
+    ged_weights = parse_float_list(args.ged_weights) or [default_ged_weight]
     semantic_weights = parse_float_list(args.semantic_weights) or [config.semantic_weight]
     weight_pairs = [(g, s) for g in ged_weights for s in semantic_weights]
 
