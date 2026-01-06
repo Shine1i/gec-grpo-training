@@ -2,6 +2,7 @@
 __pycache__/
 local_checkpoints/
 merged_models/
+merged1.2b_models/
 modal_ckekpoints/
 uv.lock
 wandb/
